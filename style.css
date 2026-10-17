@@ -1,0 +1,1138 @@
+@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;0,700;1,500&family=Golos+Text:wght@400;500;600&display=swap');
+
+/* =========================================================================
+   Omegaverse Dynamics — оформление «свет свечи в нефе»
+   Чернильный синий фон, пергаментный текст, один тёплый акцент (латунь).
+   Фазы цикла: течка/гон — глухой красный, предфаза — янтарь, затухание — сталь.
+   ========================================================================= */
+
+:root {
+    --ov-bg: #11131a;
+    --ov-bg2: #171a23;
+    --ov-bg3: #1f2330;
+    --ov-line: rgba(222, 205, 170, 0.13);
+    --ov-line2: rgba(222, 205, 170, 0.26);
+    --ov-text: #e7e0d1;
+    --ov-dim: #9d9788;
+    --ov-faint: #6e6a62;
+    --ov-brass: #c2a15f;
+    --ov-brass-d: #8f7442;
+    --ov-ember: #c4503f;
+    --ov-amber: #d3a24f;
+    --ov-slate: #6f93b8;
+    --ov-stone: #6c6b73;
+    --ov-serif: 'Cormorant Garamond', 'EB Garamond', Georgia, 'Times New Roman', serif;
+    --ov-sans: 'Golos Text', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+}
+
+/* ---------- Настройки в меню расширений (родная тема ST) ---------- */
+.ov-settings .ov-row,
+.ov-autopanel .ov-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 6px 0;
+    flex-wrap: wrap;
+}
+
+.ov-settings .ov-row label,
+.ov-autopanel .ov-row label {
+    min-width: 150px;
+}
+
+.ov-settings select,
+.ov-settings input[type="number"],
+.ov-settings input[type="text"],
+.ov-autopanel select,
+.ov-autopanel input[type="number"],
+.ov-autopanel input[type="text"] {
+    flex: 1;
+    min-width: 80px;
+}
+
+.ov-settings textarea {
+    width: 100%;
+    min-height: 100px;
+}
+
+.ov-settings hr {
+    margin: 10px 0;
+}
+
+/* ---------- Плавающий инфоблок: компактный ---------- */
+#ov_infoblock {
+    position: fixed;
+    top: 60px;
+    right: 10px;
+    width: 176px;
+    max-width: calc(100vw - 20px);
+    z-index: 2500;
+    border-radius: 12px;
+    border: 1px solid var(--ov-line2);
+    background: rgba(17, 19, 26, 0.9);
+    color: var(--ov-text);
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
+    font: 400 12px/1.35 var(--ov-sans);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+}
+
+#ov_infoblock .ov-info-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 4px 8px 4px 11px;
+    cursor: move;
+    touch-action: none;
+    user-select: none;
+    border-bottom: 1px solid var(--ov-line);
+}
+
+#ov_infoblock .ov-info-title {
+    white-space: nowrap;
+    font: 600 14px/1.2 var(--ov-serif);
+    color: var(--ov-brass);
+    letter-spacing: 0.02em;
+}
+
+#ov_infoblock .ov-info-btns {
+    display: flex;
+    flex: none;
+    align-items: center;
+}
+
+#ov_infoblock .ov-info-btns i {
+    cursor: pointer;
+    margin-left: 8px;
+    font-size: 11px;
+    color: var(--ov-dim);
+}
+
+#ov_infoblock .ov-info-btns i:hover {
+    color: var(--ov-text);
+}
+
+#ov_infoblock .ov-info-body {
+    padding: 6px 11px 8px;
+    max-height: 50vh;
+    overflow-y: auto;
+}
+
+#ov_infoblock.ov-collapsed .ov-info-body {
+    display: none;
+}
+
+#ov_infoblock.ov-collapsed .ov-info-head {
+    border-bottom: none;
+}
+
+.ov-person + .ov-person {
+    margin-top: 7px;
+    padding-top: 7px;
+    border-top: 1px solid var(--ov-line);
+}
+
+.ov-name {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 6px;
+    font-weight: 600;
+    font-size: 13px;
+    margin-bottom: 2px;
+}
+
+.ov-tag {
+    font-weight: 400;
+    font-size: 11px;
+    color: var(--ov-dim);
+    white-space: nowrap;
+}
+
+.ov-line {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 8px;
+    margin: 1px 0;
+}
+
+.ov-line span {
+    color: var(--ov-dim);
+}
+
+.ov-line b {
+    font-weight: 500;
+    text-align: right;
+}
+
+.ov-dot {
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    margin-right: 6px;
+    vertical-align: 1px;
+    background: currentColor;
+}
+
+.ov-bar {
+    height: 3px;
+    border-radius: 2px;
+    background: rgba(231, 224, 209, 0.1);
+    margin: 3px 0 5px;
+    overflow: hidden;
+}
+
+.ov-bar > div {
+    height: 100%;
+    border-radius: 2px;
+    background: var(--ov-stone);
+}
+
+.ov-bar.ov-phase-pre > div { background: var(--ov-amber); }
+.ov-bar.ov-phase-active > div { background: var(--ov-ember); }
+.ov-bar.ov-phase-fade > div { background: var(--ov-slate); }
+.ov-bar.ov-wb > div { background: var(--ov-brass); }
+
+.ov-ph { color: var(--ov-dim); }
+.ov-ph.ov-phase-normal { color: #a9a8b0; }
+.ov-ph.ov-phase-pre { color: var(--ov-amber); }
+.ov-ph.ov-phase-active { color: #e0705c; }
+.ov-ph.ov-phase-fade { color: var(--ov-slate); }
+
+/* ---------- Модальные окна ---------- */
+.ov-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 30000;
+    background: rgba(6, 7, 10, 0.65);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 12px;
+}
+
+.ov-modal {
+    width: 420px;
+    max-width: 100%;
+    max-height: 90vh;
+    max-height: 90dvh;
+    display: flex;
+    flex-direction: column;
+    border-radius: 14px;
+    border: 1px solid var(--ov-line2);
+    background: var(--ov-bg);
+    color: var(--ov-text);
+    box-shadow: 0 16px 50px rgba(0, 0, 0, 0.65);
+    font: 400 14px/1.45 var(--ov-sans);
+}
+
+.ov-modal-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 16px;
+    font: 600 20px/1.2 var(--ov-serif);
+    border-bottom: 1px solid var(--ov-line);
+}
+
+.ov-modal-x {
+    cursor: pointer;
+    font-size: 14px;
+    color: var(--ov-dim);
+}
+
+.ov-modal-body {
+    padding: 14px 16px;
+    overflow-y: auto;
+}
+
+.ov-modal-foot {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 10px 16px;
+    border-top: 1px solid var(--ov-line);
+}
+
+.ov-modal .menu_button {
+    margin: 0;
+    padding: 6px 14px;
+    width: auto;
+    background: transparent;
+    border: 1px solid var(--ov-line2);
+    color: var(--ov-text);
+}
+
+.ov-modal .menu_button:hover {
+    border-color: var(--ov-brass);
+    color: var(--ov-brass);
+}
+
+.ov-preg {
+    text-align: center;
+}
+
+.ov-preg-icon {
+    width: 54px;
+    height: 54px;
+    margin: 2px auto 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    border: 1px solid var(--ov-brass-d);
+    color: var(--ov-brass);
+    font-size: 22px;
+}
+
+.ov-preg-title {
+    font: 600 20px/1.25 var(--ov-serif);
+    margin: 4px 0 8px;
+}
+
+.ov-preg-sub {
+    color: var(--ov-dim);
+    margin: 4px 0;
+}
+
+/* ---------- Быстрое меню ---------- */
+.ov-card {
+    padding: 8px 10px;
+    margin-top: 10px;
+    border-radius: 10px;
+    border: 1px solid var(--ov-line);
+}
+
+.ov-card .ov-name {
+    font-size: 14px;
+}
+
+.ov-card .ov-line {
+    font-size: 13px;
+}
+
+.ov-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 8px;
+    align-items: center;
+}
+
+.ov-actions .menu_button {
+    margin: 0;
+    padding: 4px 10px;
+    width: auto;
+}
+
+.ov-actions select,
+.ov-actions input[type="range"] {
+    flex: 1;
+    min-width: 100px;
+}
+
+/* ---------- Панель авто-событий ---------- */
+.ov-sym {
+    margin: 8px 0;
+    padding: 6px 12px;
+    border-left: 2px solid var(--ov-brass-d);
+    text-align: left;
+}
+
+.ov-sym b {
+    display: block;
+    margin-bottom: 2px;
+    font-weight: 600;
+}
+
+.ov-sym div {
+    color: var(--ov-dim);
+}
+
+/* ---------- Плавающий значок ---------- */
+#ov_fab {
+    position: fixed;
+    z-index: 2600;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    border: 1.5px solid var(--ov-brass);
+    background: var(--ov-bg2);
+    color: var(--ov-brass);
+    font-family: var(--ov-serif);
+    font-weight: 600;
+    line-height: 1;
+    cursor: pointer;
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
+}
+
+#ov_fab .ov-fab-dot {
+    display: none;
+    position: absolute;
+    top: 1px;
+    right: 1px;
+    width: 11px;
+    height: 11px;
+    border-radius: 50%;
+    background: var(--ov-ember);
+    box-shadow: 0 0 0 2px var(--ov-bg2);
+}
+
+#ov_fab.ov-fab-alert .ov-fab-dot {
+    display: block;
+}
+
+/* =========================================================================
+   Приложение
+   ========================================================================= */
+
+.ova-backdrop {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100vh;
+    height: 100dvh;
+    overflow: hidden;
+    z-index: 31000;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    box-sizing: border-box;
+    background: rgba(6, 7, 10, 0.72);
+    backdrop-filter: blur(3px);
+    -webkit-backdrop-filter: blur(3px);
+}
+
+.ova-phone {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    max-width: 420px;
+    height: 100%;
+    max-height: 880px;
+    overflow: hidden;
+    box-sizing: border-box;
+    border-radius: 22px;
+    border: 1px solid var(--ov-line2);
+    background: var(--ov-bg);
+    color: var(--ov-text);
+    font: 400 14px/1.45 var(--ov-sans);
+    box-shadow: 0 24px 80px rgba(0, 0, 0, 0.7);
+}
+
+/* Телефон и узкие окна: на весь экран, с учётом вырезов и панелей */
+@media (max-width: 560px), (max-height: 640px) {
+    .ova-backdrop {
+        padding: 0;
+        align-items: stretch;
+        background: var(--ov-bg);
+    }
+
+    .ova-phone {
+        max-width: none;
+        max-height: none;
+        border: 0;
+        border-radius: 0;
+        box-shadow: none;
+    }
+}
+
+:where(.ova-phone) button {
+    font: inherit;
+    color: inherit;
+    background: none;
+    border: 0;
+    margin: 0;
+    padding: 0;
+    cursor: pointer;
+}
+
+.ova-statusbar {
+    flex: none;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: calc(env(safe-area-inset-top, 0px) + 10px) 18px 6px;
+}
+
+.ova-logo {
+    font: italic 500 18px/1 var(--ov-serif);
+    color: var(--ov-brass);
+    letter-spacing: 0.04em;
+}
+
+.ova-x {
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    color: var(--ov-dim);
+}
+
+.ova-x:hover {
+    color: var(--ov-text);
+    background: var(--ov-bg3);
+}
+
+.ova-screen {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 14px;
+}
+
+.ova-pad {
+    padding: 0 18px;
+}
+
+/* Нижняя панель */
+.ova-tabbar {
+    flex: none;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    border-top: 1px solid var(--ov-line);
+    background: var(--ov-bg2);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+.ova-tab {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    padding: 10px 4px 9px;
+    color: var(--ov-faint);
+    font-size: 11px;
+    box-shadow: inset 0 2px 0 transparent;
+}
+
+.ova-tab i {
+    font-size: 17px;
+}
+
+.ova-tab.on {
+    color: var(--ov-brass);
+    box-shadow: inset 0 2px 0 var(--ov-brass);
+}
+
+/* Шапка */
+.ova-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    padding: 6px 18px 4px;
+}
+
+.ova-hello {
+    color: var(--ov-dim);
+    font-size: 13px;
+}
+
+.ova-name {
+    font: 600 32px/1.1 var(--ov-serif);
+}
+
+.ova-date {
+    margin-top: 2px;
+    color: var(--ov-dim);
+    font-size: 13px;
+}
+
+.ova-avatar {
+    flex: none;
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--ov-brass-d);
+    color: var(--ov-brass);
+    font: 600 22px/1 var(--ov-serif);
+}
+
+.ova-avatar.big {
+    width: 64px;
+    height: 64px;
+    font-size: 30px;
+}
+
+/* Лента дней */
+.ova-strip {
+    display: flex;
+    justify-content: space-between;
+    padding: 12px 14px 0;
+}
+
+.ova-wd {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    flex: 1;
+}
+
+.ova-wd span {
+    min-height: 14px;
+    font-size: 10px;
+    color: var(--ov-faint);
+}
+
+.ova-wd.today span {
+    color: var(--ov-brass);
+}
+
+/* Дни: общие для ленты и календаря */
+.ova-day {
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1.5px solid transparent;
+    color: var(--ov-dim);
+    font-size: 13px;
+    font-variant-numeric: tabular-nums;
+}
+
+.ova-day.ph-active {
+    background: var(--ov-ember);
+    border-color: var(--ov-ember);
+    color: #fff;
+    font-weight: 600;
+}
+
+.ova-day.ph-pre {
+    border-color: var(--ov-amber);
+    border-style: dashed;
+    color: var(--ov-text);
+}
+
+.ova-day.ph-fade {
+    border-color: var(--ov-slate);
+    color: var(--ov-text);
+}
+
+.ova-day.pred {
+    opacity: 0.68;
+}
+
+.ova-day.today {
+    box-shadow: 0 0 0 2px var(--ov-bg), 0 0 0 3.5px var(--ov-brass);
+    color: var(--ov-text);
+    opacity: 1;
+}
+
+.ova-day.today.ph-active {
+    color: #fff;
+}
+
+/* Кольцо цикла — главный акцент экрана: свет в центре, всё остальное тихое */
+.ova-ring {
+    position: relative;
+    width: 232px;
+    height: 232px;
+    margin: 14px auto 6px;
+    background: radial-gradient(circle at 50% 50%, rgba(194, 161, 95, 0.14), rgba(194, 161, 95, 0) 62%);
+}
+
+.ova-ring svg {
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+
+.ova-ring-c {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 0 48px;
+}
+
+.ova-ring-l {
+    color: var(--ov-dim);
+    font-size: 13px;
+}
+
+.ova-ring-b {
+    font: 600 44px/1.05 var(--ov-serif);
+}
+
+.ova-ring-b.sm {
+    font-size: 28px;
+}
+
+.ova-ring-s {
+    margin-top: 2px;
+    color: var(--ov-dim);
+    font-size: 12px;
+}
+
+.ova-chips {
+    display: flex;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 0 18px;
+}
+
+.ova-chip {
+    padding: 5px 13px;
+    border-radius: 999px;
+    border: 1px solid var(--ov-line2);
+    color: var(--ov-dim);
+    font-size: 12.5px;
+}
+
+/* Быстрые действия */
+.ova-acts {
+    display: flex;
+    justify-content: space-around;
+    gap: 6px;
+    padding: 18px 12px 6px;
+}
+
+.ova-act {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+}
+
+.ova-act b {
+    font-weight: 500;
+    font-size: 12px;
+    color: var(--ov-dim);
+    text-align: center;
+}
+
+.ova-circle {
+    box-sizing: border-box;
+    width: 54px;
+    height: 54px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+}
+
+.ova-circle.pink {
+    background: var(--ov-brass);
+    color: #1a1710;
+}
+
+.ova-circle.white {
+    border: 1px solid var(--ov-line2);
+    color: var(--ov-text);
+}
+
+/* Заголовки */
+.ova-h {
+    margin: 22px 0 8px;
+    font: 600 24px/1.2 var(--ov-serif);
+}
+
+.ova-title {
+    margin: 10px 0 14px;
+    font: 600 32px/1.1 var(--ov-serif);
+}
+
+/* Советы: текст с линией слева, без карточек и значков */
+.ova-tips {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.ova-tip {
+    padding-left: 12px;
+    border-left: 2px solid var(--ov-brass-d);
+}
+
+.ova-tip b {
+    display: block;
+    font-weight: 600;
+    font-size: 14px;
+}
+
+.ova-tip p {
+    margin: 2px 0 0;
+    color: var(--ov-dim);
+    font-size: 13px;
+    max-width: 62ch;
+}
+
+/* Сводка: строки со значком, без плиток */
+.ova-cards {
+    border-top: 1px solid var(--ov-line);
+}
+
+.ova-info {
+    display: grid;
+    grid-template-columns: 26px 1fr auto;
+    align-items: baseline;
+    gap: 6px;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--ov-line);
+}
+
+.ova-info-ic {
+    color: var(--ov-brass-d);
+    font-size: 13px;
+}
+
+.ova-info-t {
+    color: var(--ov-dim);
+    font-size: 13px;
+}
+
+.ova-info-v {
+    text-align: right;
+    font-weight: 500;
+    font-size: 13.5px;
+    max-width: 14em;
+}
+
+/* Широкие блоки */
+.ova-wide {
+    margin: 14px 0;
+    padding: 12px 14px;
+    border: 1px solid var(--ov-line);
+    border-radius: 12px;
+    background: var(--ov-bg2);
+}
+
+.ova-wide-h {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 8px;
+}
+
+.ova-wide-h span {
+    color: var(--ov-dim);
+    font-size: 13px;
+}
+
+.ova-wide-h b {
+    font: 600 22px/1 var(--ov-serif);
+}
+
+.ova-phone input[type="range"] {
+    width: 100%;
+    accent-color: var(--ov-brass);
+}
+
+/* Календарь */
+.ova-calnav {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+    font: 600 20px/1 var(--ov-serif);
+}
+
+.ova-round {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    border: 1px solid var(--ov-line2);
+    color: var(--ov-dim);
+    font-size: 12px;
+}
+
+.ova-round:hover {
+    color: var(--ov-brass);
+    border-color: var(--ov-brass);
+}
+
+.ova-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 6px 2px;
+}
+
+.ova-cell {
+    position: relative;
+    display: flex;
+    justify-content: center;
+    min-height: 34px;
+}
+
+.ova-mark {
+    position: absolute;
+    bottom: -3px;
+    left: 50%;
+    width: 5px;
+    height: 5px;
+    margin-left: -2.5px;
+    border-radius: 50%;
+    background: var(--ov-brass);
+}
+
+.ova-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 14px;
+    margin: 16px 0 4px;
+    color: var(--ov-dim);
+    font-size: 12px;
+}
+
+.ova-legend i {
+    display: inline-block;
+    width: 11px;
+    height: 11px;
+    margin-right: 6px;
+    vertical-align: -1px;
+    border-radius: 50%;
+    border: 1.5px solid transparent;
+    box-sizing: border-box;
+}
+
+.ova-legend i.dot { border-style: dashed; }
+.ova-legend i.ring { border-style: solid; }
+.ova-legend i.mk { width: 5px; height: 5px; margin: 0 8px 0 3px; background: var(--ov-brass); }
+
+/* Кнопки */
+.ova-btnrow {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.ova-phone .ova-btn,
+.ova-phone .menu_button.ova-btn {
+    width: auto;
+    margin: 0;
+    padding: 8px 14px;
+    border: 1px solid var(--ov-line2);
+    border-radius: 999px;
+    background: transparent;
+    color: var(--ov-text);
+    font-size: 13px;
+    text-align: center;
+}
+
+.ova-phone .ova-btn:hover {
+    border-color: var(--ov-brass);
+    color: var(--ov-brass);
+}
+
+.ova-phone .ova-btn.wide {
+    display: block;
+    width: 100%;
+    margin-top: 16px;
+}
+
+.ova-phone .ova-btn.pink {
+    background: var(--ov-brass);
+    border-color: var(--ov-brass);
+    color: #1a1710;
+    font-weight: 600;
+}
+
+.ova-phone .ova-btn.pink:hover {
+    color: #1a1710;
+    filter: brightness(1.08);
+}
+
+.ova-muted {
+    color: var(--ov-dim);
+    font-size: 13px;
+}
+
+/* Профиль */
+.ova-prof {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 8px;
+}
+
+.ova-prof-n {
+    font: 600 26px/1.1 var(--ov-serif);
+}
+
+.ova-prof-t {
+    color: var(--ov-dim);
+    font-size: 13px;
+}
+
+.ova-sec {
+    border-bottom: 1px solid var(--ov-line);
+}
+
+.ova-sec:first-of-type {
+    border-top: 1px solid var(--ov-line);
+}
+
+.ova-sec-h {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 14px 0;
+    cursor: pointer;
+    font-weight: 600;
+}
+
+.ova-sec-h i {
+    color: var(--ov-faint);
+    font-size: 12px;
+}
+
+.ova-sec.open .ova-sec-h {
+    color: var(--ov-brass);
+}
+
+.ova-sec-b {
+    padding: 0 0 16px;
+}
+
+.ova-tools {
+    margin-bottom: 14px;
+}
+
+.ova-tools-n {
+    margin-bottom: 6px;
+    color: var(--ov-dim);
+    font-size: 13px;
+}
+
+/* Поля внутри приложения: колонкой, на тёмном фоне */
+.ova-phone .ov-row {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 4px;
+    margin: 10px 0;
+}
+
+.ova-phone .ov-row label {
+    min-width: 0;
+    color: var(--ov-dim);
+    font-size: 12.5px;
+}
+
+.ova-phone input[type="checkbox"] {
+    accent-color: var(--ov-brass);
+}
+
+.ova-phone .checkbox_label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 10px 0;
+    font-size: 13.5px;
+}
+
+.ova-phone input[type="text"],
+.ova-phone input[type="number"],
+.ova-phone input[type="date"],
+.ova-phone select {
+    width: 100%;
+    box-sizing: border-box;
+    min-height: 38px;
+    padding: 6px 10px;
+    border-radius: 8px;
+    border: 1px solid var(--ov-line2);
+    background: var(--ov-bg3);
+    color: var(--ov-text);
+    font: inherit;
+}
+
+.ova-phone input[type="color"] {
+    width: 48px;
+    height: 34px;
+    padding: 0;
+    border: 1px solid var(--ov-line2);
+    border-radius: 8px;
+    background: var(--ov-bg3);
+}
+
+.ova-phone input:focus,
+.ova-phone select:focus,
+.ova-phone button:focus-visible {
+    outline: 2px solid var(--ov-brass);
+    outline-offset: 1px;
+}
+
+.ova-phone .ov-sym b {
+    color: var(--ov-text);
+}
+
+/* Нижний лист */
+.ova-sheet-wrap {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+}
+
+.ova-sheet-bg {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: flex-end;
+    background: rgba(6, 7, 10, 0.6);
+    pointer-events: auto;
+}
+
+.ova-sheet {
+    width: 100%;
+    max-height: 80%;
+    overflow-y: auto;
+    box-sizing: border-box;
+    padding: 20px 18px calc(env(safe-area-inset-bottom, 0px) + 18px);
+    border-top: 1px solid var(--ov-line2);
+    border-radius: 18px 18px 0 0;
+    background: var(--ov-bg2);
+}
+
+.ova-sheet-t {
+    margin-bottom: 14px;
+    font: 600 26px/1.15 var(--ov-serif);
+}
+
+.ova-moods {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 16px;
+}
+
+.ova-phone .ova-mood {
+    padding: 7px 14px;
+    border-radius: 999px;
+    border: 1px solid var(--ov-line2);
+    color: var(--ov-dim);
+    font-size: 13px;
+}
+
+.ova-phone .ova-mood.on {
+    border-color: var(--ov-brass);
+    color: var(--ov-brass);
+    background: rgba(194, 161, 95, 0.1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .ova-phone * {
+        transition: none !important;
+        animation: none !important;
+    }
+}
