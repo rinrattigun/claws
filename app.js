@@ -1,5 +1,5 @@
 // Omegaverse Dynamics — «приложение» в стиле трекера цикла.
-// Плавающий значок открывает приложение: Сегодня / Календарь / Партнёр / Профиль.
+// Плавающий значок открывает приложение: Сегодня / Партнёр / Профиль.
 
 const PH_COLOR = {
     normal: '#6c6b73',
@@ -10,8 +10,7 @@ const PH_COLOR = {
 };
 
 const TABS = [
-    ['today', 'fa-calendar-day', 'Сегодня'],
-    ['calendar', 'fa-calendar-days', 'Календарь'],
+    ['today', 'fa-heart-pulse', 'Сегодня'],
     ['partner', 'fa-user-group', 'Партнёр'],
     ['profile', 'fa-circle-user', 'Профиль'],
 ];
@@ -21,7 +20,6 @@ export function initApp(api) {
 
     let tab = 'today';
     let sheet = null;
-    let calPage = 0;
     let openSec = 'me';
     let isOpen = false;
 
@@ -31,56 +29,6 @@ export function initApp(api) {
     const wordsFor = gender => (gender === 'omega'
         ? { nom: 'Течка', gen: 'течки', acc: 'течку' }
         : { nom: 'Гон', gen: 'гона', acc: 'гон' });
-
-    // -----------------------------------------------------------------------
-    // Календарь: фаза для любого дня
-    // -----------------------------------------------------------------------
-
-    function calendarFn(who) {
-        const s = S();
-        const st = ST();
-        const today = Math.floor(st.totalDays);
-        const info = api.phaseInfo(s, st, who);
-        if (info.phase === 'none') return () => null;
-
-        const irregular = api.isIrregular(s, info);
-        const owner = info.owner;
-        const src = s[owner];
-        const A = clampInt(src.activeDays, 1, 60, 5);
-        const F = clampInt(src.fadeDays, 0, 60, 2);
-        const shifted = d => Object.assign({}, st, { totalDays: d });
-
-        // Режим «внезапно»: эпизоды берём из истории
-        if (info.random) {
-            const eps = (st.history || []).filter(h => h.who === owner);
-            return day => {
-                if (day < 0) return null;
-                for (const e of eps) {
-                    const aEnd = e.end != null ? Math.min(e.day + A, e.end) : e.day + A;
-                    if (day >= e.day && day < aEnd) return { phase: 'active', pred: day > today };
-                    if (day >= aEnd && day < aEnd + F) return { phase: 'fade', pred: day > today };
-                }
-                return { phase: 'normal', pred: false };
-            };
-        }
-
-        // Прогноз скрыт: будущее видно только до конца текущего эпизода
-        let known = null;
-        if (irregular) {
-            known = new Set();
-            if (info.phase !== 'normal') {
-                for (let d = today + 1; d < today + 60; d++) {
-                    if (api.phaseInfo(s, shifted(d), who).phase === 'normal') break;
-                    known.add(d);
-                }
-            }
-        }
-        return day => {
-            if (day < 0) return null;
-            if (day > today && known && !known.has(day)) return { phase: 'normal', pred: true };
-            return { phase: api.phaseInfo(s, shifted(day), who).phase, pred: day > today };
-        };
-    }
 
     // -----------------------------------------------------------------------
     // Кольцо цикла
@@ -99,7 +47,7 @@ export function initApp(api) {
             const x = 100 + R * Math.cos(ang);
             const y = 100 + R * Math.sin(ang);
             const isToday = i === info.day;
-            out += `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${isToday ? dotR + 2.5 : dotR}" fill="${PH_COLOR[ph] || PH_COLOR.normal}"${ph === 'normal' ? ' fill-opacity=".35"' : ''}${isToday ? ' stroke="#efe6d2" stroke-width="2.5"' : ''}/>`;
+            out += `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${isToday ? dotR + 2.5 : dotR}" fill="${PH_COLOR[ph] || PH_COLOR.normal}"${ph === 'normal' ? ' fill-opacity=".35"' : ''}${isToday ? ' style="stroke:var(--ov-text)" stroke-width="2.5"' : ''}/>`;
         }
         return out;
     }
@@ -115,7 +63,7 @@ export function initApp(api) {
         const R = 86;
         const C = 2 * Math.PI * R;
 
-        const track = `<circle cx="100" cy="100" r="${R}" fill="none" stroke="rgba(231,224,209,.09)" stroke-width="8"/>`;
+        const track = `<circle cx="100" cy="100" r="${R}" fill="none" style="stroke:var(--ov-line)" stroke-width="8"/>`;
         const arc = (f, col, op = 1) => `<circle cx="100" cy="100" r="${R}" fill="none" stroke="${col}" stroke-opacity="${op}" stroke-width="8" stroke-linecap="round" stroke-dasharray="${(C * Math.max(0, Math.min(1, f))).toFixed(1)} ${C.toFixed(1)}" transform="rotate(-90 100 100)"/>`;
 
         let svg = track;
@@ -296,138 +244,162 @@ export function initApp(api) {
         </div>`;
     }
 
-    function todayScreen() {
+    function rowHtml(label, value) {
+        return `<div class="ova-row"><span>${label}</span><b>${value}</b></div>`;
+    }
+
+    function barHtml(pct, cls) {
+        return `<div class="ova-bar ${cls}"><div style="width:${Math.max(0, Math.min(100, pct))}%"></div></div>`;
+    }
+
+    // Сводка: то, что раньше показывал плавающий инфоблок
+    function statusHtml(who) {
         const s = S();
         const st = ST();
-        const who = 'user';
+        const p = s[who];
+        const info = api.phaseInfo(s, st, who);
+        const shown = api.visiblePreg(st, who);
+        const preg = st[who].preg;
+        const term = clampInt(s.termWeeks, 4, 60, 40);
+        let h = '';
+
+        if (info.phase === 'none') {
+            h += rowHtml('Цикл', 'нет (бета)');
+        } else {
+            const synced = info.owner !== who ? ' (синхр.)' : '';
+            const irr = api.isIrregular(s, info);
+            const word = wordsFor(p.gender).nom;
+            if (info.broken) {
+                h += rowHtml('Цикл', 'сбит');
+            } else if (irr) {
+                h += rowHtml('Цикл', `нерегулярный${synced}`);
+            } else {
+                h += rowHtml('Цикл', `день ${info.day + 1}/${info.L}${synced}`);
+                h += barHtml(((info.day + 1) / info.L) * 100, `ph-${info.phase}`);
+            }
+            h += rowHtml('Фаза', `<span class="ova-ph ph-${info.phase}">${esc(api.phaseLabel(p.gender, info.phase, info))}</span>`);
+            if (!info.broken) {
+                h += rowHtml(word, info.phase === 'active'
+                    ? `идёт, ещё ${info.daysLeft} дн.`
+                    : (irr ? 'непредсказуемо' : `через ${info.daysToActive} дн.`));
+            }
+            if (p.gender === 'omega' && !shown) {
+                h += rowHtml('Фертильность', `~${api.conceptionChance(s, st, who, false, true)}%`);
+            }
+        }
+
+        h += rowHtml('Настроение', esc(api.MOODS[api.effectiveMood(s, st, who)][0]));
+        if ((p.scent || '').trim()) h += rowHtml('Запах', esc(p.scent.trim()));
+
+        if (shown) {
+            const wb = clampInt(shown.wellbeing, 0, 100, 100);
+            h += rowHtml('Беременность', `неделя ${api.pregWeek(st, who)}/${term}`);
+            h += rowHtml('Самочувствие', `${wb}%`);
+            h += barHtml(wb, 'wb');
+        } else {
+            if (p.gender === 'omega') h += rowHtml('Беременность', 'нет');
+            if (preg && preg.flags && preg.flags.sick) {
+                const wb = clampInt(preg.wellbeing, 0, 100, 100);
+                h += rowHtml('Самочувствие', `${wb}%`);
+                h += barHtml(wb, 'wb');
+            }
+        }
+        if (s.bonded) h += rowHtml('Связь', 'есть метка');
+        return `<div class="ova-status">${h}</div>`;
+    }
+
+    // Кнопки и настройки: начать/завершить течку или гон, настроение, беременность
+    function controlsHtml(who) {
+        const s = S();
+        const st = ST();
         const p = s[who];
         const info = api.phaseInfo(s, st, who);
         const shown = api.visiblePreg(st, who);
         const W = wordsFor(p.gender);
-        const today = Math.floor(st.totalDays);
-        const cal = calendarFn(who);
+        const btn = (act, label, extra = '') => `<button class="ova-btn${extra}" data-act="${act}" data-who="${who}">${label}</button>`;
+        let h = '';
 
-        let strip = '';
-        const start = Math.max(0, today - 4);
-        for (let i = 0; i < 7; i++) {
-            const d = start + i;
-            const c = cal(d) || { phase: 'normal' };
-            const isToday = d === today;
-            strip += `<div class="ova-wd${isToday ? ' today' : ''}"><span>${isToday ? 'сегодня' : ''}</span><div class="ova-day ph-${c.phase}${c.pred ? ' pred' : ''}${isToday ? ' today' : ''}">${d + 1}</div></div>`;
-        }
-
-        const active = info.phase === 'active';
-        let heatBtn = '';
         if (info.phase !== 'none') {
-            heatBtn = `<button class="ova-act" data-act="toggleHeat">
-                <span class="ova-circle pink"><i class="fa-solid ${active ? 'fa-check' : 'fa-droplet'}"></i></span>
-                <b>${active ? `Завершить ${W.acc}` : `Отметить ${W.acc}`}</b></button>`;
+            const active = info.phase === 'active';
+            h += `<div class="ova-h">${W.nom}</div><div class="ova-btnrow">
+                ${active ? btn('endActive', `Завершить ${W.acc}`, ' pink') : btn('startActive', `Начать ${W.acc}`, ' pink')}
+                ${btn('suddenHeat', 'Внезапно (с уведомлением)')}
+                ${btn('resetCycle', 'Сбросить цикл')}
+            </div>`;
         }
 
+        const cur = st[who].mood || 'auto';
+        const chips = [`<button class="ova-mood${cur === 'auto' ? ' on' : ''}" data-act="mood" data-who="${who}" data-mood="auto">Авто</button>`]
+            .concat(Object.entries(api.MOODS).map(([k, [ru]]) =>
+                `<button class="ova-mood${cur === k ? ' on' : ''}" data-act="mood" data-who="${who}" data-mood="${k}">${ru}</button>`))
+            .join('');
+        h += `<div class="ova-h">Настроение</div><div class="ova-moods">${chips}</div>`;
+
+        if (shown) {
+            const wb = clampInt(shown.wellbeing, 0, 100, 100);
+            h += `<div class="ova-wide"><div class="ova-wide-h"><span>Самочувствие</span><b>${wb}%</b></div>
+                <input type="range" min="0" max="100" value="${wb}" data-wb="${who}" /></div>`;
+        }
+
+        if (p.gender === 'omega') {
+            h += '<div class="ova-h">Беременность</div>';
+            if (!shown) {
+                h += `<label class="checkbox_label"><input type="checkbox" data-knot="${who}" ${api.knotFlags[who] ? 'checked' : ''} /><span>Узел (knotting)</span></label>`;
+            }
+            h += `<div class="ova-btnrow">
+                ${shown ? btn('birth', 'Роды') : btn('conceive', 'Бросок зачатия') + btn('forcePreg', 'Беременность без броска')}
+                ${btn('cancelPreg', 'Сбросить беременность')}
+            </div>`;
+        }
+        return `<div class="ova-pad ova-controls">${h}</div>`;
+    }
+
+    function personScreen(who, headHtml) {
+        const s = S();
+        const st = ST();
+        const p = s[who];
+        const shown = api.visiblePreg(st, who);
+        const m = api.effectiveMood(s, st, who);
         const fert = (p.gender === 'omega' && !shown)
             ? `<span class="ova-chip">Зачатие ~${api.conceptionChance(s, st, who, false, true)}%</span>`
             : '';
-        const m = api.effectiveMood(s, st, who);
-
-        let wbCard = '';
-        if (shown) {
-            const wb = clampInt(shown.wellbeing, 0, 100, 100);
-            wbCard = `<div class="ova-wide"><div class="ova-wide-h"><span>Самочувствие</span><b>${wb}%</b></div>
-                <input type="range" min="0" max="100" value="${wb}" data-wb="user" /></div>`;
-        }
+        const intimacy = who === 'user'
+            ? `<div class="ova-acts"><button class="ova-act" data-act="sheet" data-sheet="intimacy"><span class="ova-circle white"><i class="fa-solid fa-heart"></i></span><b>Близость</b></button></div>`
+            : '';
 
         return `
-        ${headerHtml()}
-        <div class="ova-strip">${strip}</div>
+        ${headHtml}
         ${heroHtml(who)}
         <div class="ova-chips">${fert}<span class="ova-chip">${esc(api.MOODS[m][0])}</span></div>
-        <div class="ova-acts">
-            ${heatBtn}
-            <button class="ova-act" data-act="sheet" data-sheet="symptoms"><span class="ova-circle white"><i class="fa-solid fa-plus"></i></span><b>Симптомы</b></button>
-            <button class="ova-act" data-act="sheet" data-sheet="intimacy"><span class="ova-circle white"><i class="fa-solid fa-heart"></i></span><b>Близость</b></button>
-        </div>
+        ${intimacy}
         <div class="ova-pad">
-            ${wbCard}
+            ${statusHtml(who)}
+        </div>
+        ${controlsHtml(who)}
+        <div class="ova-pad">
             ${tipsHtml(who)}
             <div class="ova-h">Сегодня</div>
             ${cardsHtml(who)}
         </div>`;
     }
 
-    function calendarScreen() {
-        const s = S();
-        const st = ST();
-        const p = s.user;
-        const today = Math.floor(st.totalDays);
-        const cal = calendarFn('user');
-        const W = wordsFor(p.gender);
-
-        const first = Math.floor(today / 7) * 7 - 7 + calPage * 35;
-        const title = `Дни ${Math.max(1, first + 1)}–${Math.max(1, first + 35)}`;
-
-        const pv = api.visiblePreg(st, 'user');
-        const birthDay = pv ? Math.floor(pv.startDay + clampInt(s.termWeeks, 4, 60, 40) * 7) : null;
-
-        let cells = '';
-        for (let i = 0; i < 35; i++) {
-            const d = first + i;
-            if (d < 0) {
-                cells += '<div class="ova-cell"></div>';
-                continue;
-            }
-            const c = cal(d) || { phase: 'normal' };
-            const isToday = d === today;
-            const mark = birthDay === d ? '<i class="ova-mark"></i>' : '';
-            cells += `<div class="ova-cell"><div class="ova-day ph-${c.phase}${c.pred ? ' pred' : ''}${isToday ? ' today' : ''}">${d + 1}</div>${mark}</div>`;
-        }
-
-        return `
-        <div class="ova-pad">
-            <div class="ova-title">Календарь</div>
-            <div class="ova-calnav">
-                <button class="ova-round" data-act="calPrev"><i class="fa-solid fa-chevron-left"></i></button>
-                <div>${title}</div>
-                <button class="ova-round" data-act="calNext"><i class="fa-solid fa-chevron-right"></i></button>
-            </div>
-            <div class="ova-grid">${cells}</div>
-            <div class="ova-legend">
-                <span><i style="background:${PH_COLOR.active}"></i>${W.nom}</span>
-                <span><i class="dot" style="border-color:${PH_COLOR.pre}"></i>Предфаза</span>
-                <span><i class="ring" style="border-color:${PH_COLOR.fade}"></i>Затухание</span>
-                <span><i class="ring" style="border-color:#c2a15f"></i>Сегодня</span>
-                ${pv ? '<span><i class="mk"></i>Срок родов</span>' : ''}
-            </div>
-            <div class="ova-wide">
-                <div class="ova-wide-h"><span>День истории</span><b>${today + 1}</b></div>
-                <div class="ova-btnrow">
-                    <button class="ova-btn" data-act="time" data-n="-1">−1 день</button>
-                    <button class="ova-btn" data-act="time" data-n="1">+1 день</button>
-                    <button class="ova-btn" data-act="time" data-n="7">+7 дней</button>
-                </div>
-            </div>
-        </div>`;
+    function todayScreen() {
+        return personScreen('user', headerHtml());
     }
 
     function partnerScreen() {
-        const s = S();
-        const who = 'char';
-        const p = s[who];
+        const p = S().char;
         const g = api.GENDERS[p.gender];
-        const nm = esc(api.names().char);
-        return `
+        const head = `
         <div class="ova-pad">
             <div class="ova-title">Партнёр</div>
             <div class="ova-prof">
                 <div class="ova-avatar big">${esc((api.names().char || '?').charAt(0).toUpperCase())}</div>
-                <div><div class="ova-prof-n">${nm}</div>
+                <div><div class="ova-prof-n">${esc(api.names().char)}</div>
                 <div class="ova-prof-t">${g.sym} ${g.ru} · ${api.SEX[p.sex].sym} ${api.SEX[p.sex].ru}</div></div>
             </div>
-        </div>
-        ${heroHtml(who)}
-        <div class="ova-pad">
-            ${cardsHtml(who)}
-            ${tipsHtml(who)}
         </div>`;
+        return personScreen('char', head);
     }
 
     // ---- Профиль ----
@@ -451,9 +423,18 @@ export function initApp(api) {
         ${F.chk('syncBond', 'Синхронизировать течку и гон при связи')}
         ${F.num('activeFertility', 'Фертильность в течку (%)', 0, 100)}
         ${F.num('termWeeks', 'Срок беременности (недели)', 4, 60)}
-        ${F.chk('autoTick', 'Время идёт само (с каждым ответом)')}
-        ${F.num('daysPerMessage', 'Дней за сообщение', 0, 365, 0.1)}
-        ${F.chk('showInfoblock', 'Показывать плавающий инфоблок')}`;
+        ${F.chk('clock.enabled', 'Время из инфоблока в чате')}
+        ${F.chk('autoTick', 'Без инфоблока: время идёт само (с каждым ответом)')}
+        ${F.num('daysPerMessage', 'Дней за сообщение (без инфоблока)', 0, 365, 0.1)}
+        <div class="ova-wide">
+            <div class="ova-wide-h"><span>День истории</span><b>${Math.floor(ST().totalDays) + 1}</b></div>
+            ${api.clockLabel() ? `<div class="ova-wide-h"><span>Время в чате</span><b>${esc(api.clockLabel())}</b></div>` : ''}
+            <div class="ova-btnrow">
+                <button class="ova-btn" data-act="time" data-n="-1">−1 день</button>
+                <button class="ova-btn" data-act="time" data-n="1">+1 день</button>
+                <button class="ova-btn" data-act="time" data-n="7">+7 дней</button>
+            </div>
+        </div>`;
     }
 
     function iconFieldsHtml() {
@@ -468,27 +449,6 @@ export function initApp(api) {
         ${rng('icon.opacity', 'Прозрачность (видимость)', 0.15, 1, 0.05)}
         ${api.Fields.sel('icon.glyph', 'Символ', api.ICON_GLYPHS.map(g => [g, `${g} ${glyphNames[g] || ''}`.trim()]))}
         <div class="menu_button ova-btn" data-fab-reset>Вернуть значок в угол</div>`;
-    }
-
-    function toolsHtml(who) {
-        const s = S();
-        const st = ST();
-        const p = s[who];
-        const info = api.phaseInfo(s, st, who);
-        const shown = api.visiblePreg(st, who);
-        const W = wordsFor(p.gender);
-        const btn = (act, label) => `<button class="ova-btn" data-act="${act}" data-who="${who}">${label}</button>`;
-        let b = '';
-        if (info.phase !== 'none') {
-            b += btn('startActive', `Начать ${W.acc}`) + btn('suddenHeat', 'Внезапно (с окном)') + btn('endActive', 'Завершить') + btn('resetCycle', 'Сбросить цикл');
-        }
-        if (p.gender === 'omega') {
-            b += shown
-                ? btn('birth', 'Роды')
-                : btn('conceive', 'Бросок зачатия') + btn('forcePreg', 'Беременность без броска');
-            b += btn('cancelPreg', 'Сбросить беременность');
-        }
-        return `<div class="ova-tools"><div class="ova-tools-n">${esc(api.names()[who])}</div><div class="ova-btnrow">${b || '<span class="ova-muted">Для беты инструментов нет</span>'}</div></div>`;
     }
 
     function section(id, title, inner) {
@@ -517,8 +477,6 @@ export function initApp(api) {
             ${section('auto', 'Авто-события', api.autoPanelHtml(true, false))}
             ${section('world', 'Мир, связь и время', worldFields())}
             ${section('icon', 'Плавающий значок', iconFieldsHtml())}
-            ${section('tools', 'Инструменты', toolsHtml('user') + toolsHtml('char'))}
-            <button class="ova-btn wide" data-act="quickMenu">Открыть расширенное меню</button>
         </div>`;
     }
 
@@ -537,20 +495,7 @@ export function initApp(api) {
         const st = ST();
         let body = '';
 
-        if (sheet === 'symptoms') {
-            const cur = st.user.mood || 'auto';
-            const chips = [`<button class="ova-mood${cur === 'auto' ? ' on' : ''}" data-act="mood" data-mood="auto">Авто</button>`]
-                .concat(Object.entries(api.MOODS).map(([k, [ru]]) =>
-                    `<button class="ova-mood${cur === k ? ' on' : ''}" data-act="mood" data-mood="${k}">${ru}</button>`))
-                .join('');
-            const shown = api.visiblePreg(st, 'user');
-            const wb = shown ? clampInt(shown.wellbeing, 0, 100, 100) : null;
-            body = `
-            <div class="ova-sheet-t">Как ты себя чувствуешь?</div>
-            <div class="ova-moods">${chips}</div>
-            ${wb != null ? `<div class="ova-wide"><div class="ova-wide-h"><span>Самочувствие</span><b>${wb}%</b></div><input type="range" min="0" max="100" value="${wb}" data-wb="user" /></div>` : ''}
-            <button class="ova-btn wide pink" data-act="closeSheet">Готово</button>`;
-        } else if (sheet === 'intimacy') {
+        if (sheet === 'intimacy') {
             const om = pairOmega();
             if (!om) {
                 body = `<div class="ova-sheet-t">Близость</div>
@@ -579,7 +524,6 @@ export function initApp(api) {
     // -----------------------------------------------------------------------
 
     function screenHtml(which) {
-        if (which === 'calendar') return calendarScreen();
         if (which === 'partner') return partnerScreen();
         if (which === 'profile') return profileScreen();
         return todayScreen();
@@ -617,16 +561,10 @@ export function initApp(api) {
                 case 'closeSheet':
                 case 'bgClose': sheet = null; render(); return;
                 case 'mood':
-                    api.getState().user.mood = $t.data('mood');
+                    api.getState()[who || 'user'].mood = $t.data('mood');
                     api.saveState();
                     api.refreshAll();
                     return;
-                case 'toggleHeat': {
-                    const info = api.phaseInfo(S(), ST(), 'user');
-                    api.setCycleDay('user', info.phase === 'active' ? 'end' : 'active');
-                    api.refreshAll();
-                    return;
-                }
                 case 'intimacy': {
                     const om = pairOmega();
                     if (om) api.doConceive(om, false);
@@ -634,8 +572,6 @@ export function initApp(api) {
                     api.refreshAll();
                     return;
                 }
-                case 'calPrev': calPage -= 1; render(); return;
-                case 'calNext': calPage += 1; render(); return;
                 case 'time': api.shiftTime($t.data('n')); return;
                 case 'sec': openSec = openSec === $t.data('sec') ? '' : $t.data('sec'); render(); return;
                 case 'startActive': api.setCycleDay(who, 'active'); break;
@@ -645,11 +581,16 @@ export function initApp(api) {
                 case 'conceive': api.doConceive(who, false); break;
                 case 'forcePreg': api.doConceive(who, true); break;
                 case 'cancelPreg': api.cancelPreg(who); return;
-                case 'birth': api.birthPopup(who); break;
-                case 'quickMenu': api.openQuick(); return;
+                case 'birth': api.finishPregnancy(who); break;
                 default: return;
             }
             api.refreshAll();
+        });
+
+        $r.on('click', '[data-fab-reset]', function () {
+            S().icon.pos = null;
+            api.saveSettingsDebounced();
+            applyIcon();
         });
 
         $r.on('change', 'input[data-wb]', function () {
@@ -686,7 +627,6 @@ export function initApp(api) {
         if (which) tab = which;
         isOpen = true;
         sheet = null;
-        calPage = 0;
         const $r = ensureRoot();
         $r.css('display', 'flex');
         render(true);
@@ -756,24 +696,35 @@ export function initApp(api) {
         };
         const size = num(ic.size, 32, 120, 52);
         const op = num(ic.opacity, 0.15, 1, 0.92);
-        const col = ic.color || '#c2a15f';
+        const col = (ic.color && ic.color.toLowerCase() !== '#c2a15f') ? ic.color : 'var(--ov-brass)';
 
         $f.show().css({ width: size, height: size, color: col, borderColor: col, opacity: op, fontSize: Math.round(size * 0.5) });
         $f.find('.ov-fab-glyph').text(api.ICON_GLYPHS.includes(ic.glyph) ? ic.glyph : api.ICON_GLYPHS[0]);
 
-        if (ic.pos) {
-            const x = Math.min(window.innerWidth - size, Math.max(0, ic.pos.x));
-            const y = Math.min(window.innerHeight - size, Math.max(0, ic.pos.y));
-            $f.css({ left: x, top: y, right: 'auto', bottom: 'auto' });
+        const vw = window.innerWidth || document.documentElement.clientWidth || 360;
+        const vh = window.innerHeight || document.documentElement.clientHeight || 640;
+        let x;
+        let y;
+        if (ic.pos && Number.isFinite(ic.pos.x) && Number.isFinite(ic.pos.y)) {
+            x = ic.pos.x;
+            y = ic.pos.y;
         } else {
-            $f.css({ left: 'auto', top: 'auto', right: 16, bottom: 110 });
+            x = vw - size - 14;
+            y = vh - size - 120;
         }
+        x = Math.min(vw - size, Math.max(0, x));
+        y = Math.min(vh - size, Math.max(0, y));
+        $f.css({ left: x, top: y, right: 'auto', bottom: 'auto' });
 
         const info = api.phaseInfo(s, ST(), 'user');
         $f.toggleClass('ov-fab-alert', info.phase === 'active' && !info.broken);
     }
 
+    window.addEventListener('resize', () => applyIcon());
+    window.addEventListener('orientationchange', () => setTimeout(applyIcon, 300));
+
     function refresh() {
+        if (!S().enabled && isOpen) close();
         applyIcon();
         render();
     }
