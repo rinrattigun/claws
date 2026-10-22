@@ -504,30 +504,47 @@ function pregWeek(st, who) {
     return Math.max(0, Math.floor((st.totalDays - p.startDay) / 7));
 }
 
+// Журнал событий персонажа (откатывается вместе со снимками при свайпе)
+function addLog(who, text) {
+    const st = getState();
+    if (!Array.isArray(st[who].log)) st[who].log = [];
+    st[who].log.push({ day: Math.floor(st.totalDays), text });
+    if (st[who].log.length > 60) st[who].log.splice(0, st[who].log.length - 60);
+}
+
 function doConceive(who, force) {
     const s = getSettings();
     const st = getState();
     const hidden = isHidden(s);
     if (s[who].gender !== 'omega') {
-        toastr.warning('Вынашивать беременность может только Омега.');
+        flash('Вынашивать беременность может только Омега.', 'fa-circle-info', 'warn');
         return;
     }
     if (st[who].preg) {
-        toastr.info(hidden ? 'Бросок выполнен.' : 'Беременность уже есть.');
+        flash(hidden ? 'Близость отмечена.' : 'Беременность уже есть.');
         return;
     }
     if (force) {
         startPregnancy(who, null);
-        if (hidden) toastr.info('Готово.');
+        flash(hidden ? 'Готово. Результат скрыт: признаки проявятся позже.' : 'Беременность началась.', 'fa-person-pregnant', 'good');
         return;
     }
     const chance = conceptionChance(s, st, who, !!knotFlags[who]);
-    if (Math.random() * 100 < chance) {
+    const ok = Math.random() * 100 < chance;
+    if (hidden) {
+        // Одинаковое сообщение при успехе и неудаче, чтобы не выдать результат
+        addLog(who, knotFlags[who] ? 'Близость с узлом' : 'Близость');
+        if (ok) startPregnancy(who, chance);
+        saveState();
+        flash('Близость отмечена. Если зачатие произошло, первые признаки появятся через несколько дней: следите за самочувствием.', 'fa-heart', 'info', 7000);
+    } else if (ok) {
         startPregnancy(who, chance);
-        if (hidden) toastr.info('Бросок выполнен.');
     } else {
-        toastr.info(hidden ? 'Бросок выполнен.' : `Зачатия не произошло (шанс был ~${chance}%).`);
+        addLog(who, `Близость: зачатия не произошло (шанс ~${chance}%)`);
+        saveState();
+        flash(`Зачатия не произошло (шанс был ~${chance}%).`);
     }
+    refreshAll();
 }
 
 function startPregnancy(who, chance) {
@@ -553,9 +570,11 @@ function startPregnancy(who, chance) {
         wellbeing: 100,
         birthNotified: false,
         revealed: !hidden,
+        confirmedDay: hidden ? null : Math.floor(st.totalDays),
         flags: { mood: false, cycle: false, sick: false },
         events,
     };
+    if (!hidden) addLog(who, chance != null ? `Зачатие! Беременность подтверждена (шанс был ~${chance}%)` : 'Беременность подтверждена');
     saveState();
     refreshAll();
     if (!hidden) pregnancyPopup(who, chance);
@@ -563,6 +582,7 @@ function startPregnancy(who, chance) {
 
 function finishPregnancy(who) {
     const st = getState();
+    if (st[who].preg) addLog(who, 'Роды');
     st[who].preg = null;
     saveState();
     refreshAll();
@@ -589,9 +609,12 @@ function checkPregEvents() {
             e.done = true;
             if (e.type === 'reveal') {
                 p.revealed = true;
+                p.confirmedDay = Math.floor(st.totalDays);
+                addLog(who, 'Беременность подтверждена');
                 reveal = true;
             } else {
                 p.flags[e.type] = true;
+                addLog(who, `Симптом: ${SYMPTOMS[e.type][0]}`);
                 symptoms.push(e.type);
                 if (e.type === 'sick') p.wellbeing = randInt(45, 65);
             }
@@ -1287,7 +1310,7 @@ function autoPanelHtml(full, withTitle = true) {
                 ['mixed', 'Расписание + внезапные'],
             ])}
             ${F.num('auto.onsetChance', 'Шанс начала за сообщение (%)', 0, 100, 0.5)}
-            ${F.chk('auto.hiddenPreg', 'Скрытая беременность (узнаём по симптомам)')}
+            ${F.chk('auto.hiddenPreg', 'Скрытая беременность (сначала симптомы, потом подтверждение)')}
             ${F.chk('auto.popups', 'Уведомления о событиях (строка сверху)')}`;
     if (full) {
         h += `

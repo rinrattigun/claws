@@ -943,3 +943,23 @@
     from { opacity: 0; transform: translateY(-12px); }
     to { opacity: 1; transform: none; }
 }
+
+/* ---------- Карточка беременности ---------- */
+.ova-preg-card {
+    border-color: var(--ov-brass);
+    background: color-mix(in srgb, var(--ov-brass) 8%, var(--ov-bg2));
+}
+
+.ova-preg-card.warn {
+    border-color: var(--ov-amber);
+    background: color-mix(in srgb, var(--ov-amber) 8%, var(--ov-bg2));
+}
+
+.ova-preg-h {
+    font: 600 22px/1.2 var(--ov-serif);
+    margin-bottom: 4px;
+}
+
+.ova-preg-h i { color: var(--ov-brass); margin-right: 6px; }
+.ova-preg-card.warn .ova-preg-h i { color: var(--ov-amber); }
+.ova-preg-card .ova-muted { margin: 4px 0 8px; }

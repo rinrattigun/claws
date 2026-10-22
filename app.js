@@ -252,6 +252,56 @@ export function initApp(api) {
         return `<div class="ova-bar ${cls}"><div style="width:${Math.max(0, Math.min(100, pct))}%"></div></div>`;
     }
 
+    // Беременность: подтверждена — полная картина; не подтверждена, но есть симптомы — намёк без спойлеров
+    function pregPanelHtml(who) {
+        const s = S();
+        const st = ST();
+        const term = clampInt(s.termWeeks, 4, 60, 40);
+        const preg = st[who].preg;
+        if (!preg) return '';
+        const shown = api.visiblePreg(st, who);
+        if (!shown) {
+            const f = preg.flags || {};
+            if (!(f.mood || f.cycle || f.sick)) return '';
+            return `<div class="ova-pad"><div class="ova-status ova-preg-card warn">
+                <div class="ova-preg-h"><i class="fa-solid fa-triangle-exclamation"></i> Необычные симптомы</div>
+                <p class="ova-muted">Организм ведёт себя непривычно, причина пока неясна. Подтверждение или объяснение придёт позже.</p>
+            </div></div>`;
+        }
+        const elapsed = Math.max(0, st.totalDays - preg.startDay);
+        const w = api.pregWeek(st, who);
+        const tri = w < 13 ? 1 : (w < 27 ? 2 : 3);
+        const stage = [
+            'Первый триместр: возможны слабость, тошнота и перепады настроения. Организм перестраивается.',
+            'Второй триместр: самочувствие обычно выравнивается, живот становится заметным.',
+            'Третий триместр: усталость, тяжесть, подготовка к родам. Нужен покой и близкий человек рядом.',
+        ][tri - 1];
+        const left = Math.max(0, Math.ceil(term * 7 - elapsed));
+        const conceived = Math.floor(preg.startDay) + 1;
+        const due = Math.floor(preg.startDay + term * 7) + 1;
+        const conf = preg.confirmedDay != null ? preg.confirmedDay + 1 : null;
+        const wb = clampInt(preg.wellbeing, 0, 100, 100);
+        const name = esc(api.names()[who]);
+        let h = `<div class="ova-preg-h"><i class="fa-solid fa-person-pregnant"></i> Беременность подтверждена</div>
+            <p class="ova-muted">${name}: ${esc(stage)}</p>`;
+        h += rowHtml('Срок', `неделя ${w} из ${term} · ${tri} триместр`);
+        h += barHtml((elapsed / (term * 7)) * 100, 'wb');
+        h += rowHtml('Зачатие', `день ${conceived}`);
+        if (conf != null) h += rowHtml('Подтверждена', `день ${conf}`);
+        h += rowHtml('Роды ожидаются', left > 0 ? `день ${due} (через ~${left} дн.)` : '<b>срок наступил</b>');
+        h += rowHtml('Самочувствие', `${wb}%`);
+        if (S()[who].sex === 'male') h += rowHtml('Роды', 'кесарево сечение');
+        return `<div class="ova-pad"><div class="ova-status ova-preg-card">${h}</div></div>`;
+    }
+
+    function logHtml(who) {
+        const log = (ST()[who].log || []).slice(-12).reverse();
+        if (!log.length) return '';
+        return `<div class="ova-pad"><div class="ova-h">Журнал</div><div class="ova-status">${log
+            .map(e => rowHtml(`день ${e.day + 1}`, esc(e.text)))
+            .join('')}</div></div>`;
+    }
+
     // Сводка: то, что раньше показывал плавающий инфоблок
     function statusHtml(who) {
         const s = S();
@@ -297,7 +347,7 @@ export function initApp(api) {
             h += rowHtml('Самочувствие', `${wb}%`);
             h += barHtml(wb, 'wb');
         } else {
-            if (p.gender === 'omega') h += rowHtml('Беременность', 'нет');
+            if (p.gender === 'omega') h += rowHtml('Беременность', (s.auto.enabled && s.auto.hiddenPreg) ? 'не подтверждена' : 'нет');
             if (preg && preg.flags && preg.flags.sick) {
                 const wb = clampInt(preg.wellbeing, 0, 100, 100);
                 h += rowHtml('Самочувствие', `${wb}%`);
@@ -372,9 +422,11 @@ export function initApp(api) {
         ${heroHtml(who)}
         <div class="ova-chips">${fert}<span class="ova-chip">${esc(api.MOODS[m][0])}</span></div>
         ${intimacy}
+        ${pregPanelHtml(who)}
         <div class="ova-pad">
             ${statusHtml(who)}
         </div>
+        ${logHtml(who)}
         ${controlsHtml(who)}
         <div class="ova-pad">
             ${tipsHtml(who)}
