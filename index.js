@@ -11,7 +11,7 @@
 
 import { extension_settings, getContext, saveMetadataDebounced } from '../../../extensions.js';
 import {
-    saveSettingsDebounced,
+    saveSettingsDebounced as saveSettingsCore,
     setExtensionPrompt,
     extension_prompt_types,
     extension_prompt_roles,
@@ -62,6 +62,8 @@ const MOODS = {
 const SYMPTOMS = {
     mood: ['Эмоциональный фон изменился', 'Внезапные перепады настроения, непривычная слезливость и раздражительность без видимой причины.'],
     cycle: ['Цикл сбился', 'Ожидаемая течка так и не наступила, привычный ритм нарушен.'],
+    nausea: ['Тошнота', 'Неожиданно подступает тошнота, особенно от резких запахов и по утрам. Причина неясна.'],
+    dizzy: ['Головокружение', 'Внезапная слабость и головокружение, темнеет в глазах при резком движении.'],
     sick: ['Самочувствие ухудшилось', 'Слабость, головокружение, тошнота и повышенная чувствительность к запахам.'],
 };
 
@@ -107,6 +109,9 @@ const SETTINGS_DEFAULTS = {
         moodTtl: 3,             // сколько сообщений держать настроение, если поле пропало
     },
     worldRules: DEFAULT_RULES,
+    names: { user: '', char: '', lastUser: '', lastChar: '' },   // имена в этом чате: ручные и запомненные
+    dyn: { auto: true, every: 8, count: 3 },   // задания в «Динамике»: авто-генерация по сюжету
+    chats: {},              // резервные копии данных по чатам (на случай потери метаданных)
     user: defaultPerson('female', 'omega'),
     char: defaultPerson('male', 'alpha'),
     icon: { show: true, color: '#c2a15f', size: 52, opacity: 0.92, glyph: 'Ω', pos: null },
@@ -129,7 +134,10 @@ const STATE_DEFAULTS = {
     totalDays: 0,
     lastLen: 0,
     lastRollLen: 0,
+    rev: 0,         // время последнего сохранения (для сверки с резервной копией)
+    cfg: null,      // настройки этого чата: профили, цикл, запах, авто-события
     clock: null,    // { baseMs, baseDays, lastMs } — привязка дней цикла к дате в чате
+    dyn: { fb: { user: { v: 0, day: 0 }, char: { v: 0, day: 0 } }, lastMsg: null, seq: 0 },  // задания и сдвиг самочувствия (не откатывается свайпами)
     snaps: {},      // снимки состояния «после» каждого обработанного сообщения (по индексу)
     base: null,     // { idx, snap } — состояние до первого обработанного сообщения
     user: { offset: 0, mood: 'auto', preg: null, randomStart: null, sm: null },
@@ -190,7 +198,20 @@ function mergeDefaults(target, def) {
     }
 }
 
-function getSettings() {
+// Настройки, которые хранятся отдельно для каждого чата (профили, запах, цикл и т.д.).
+// Остальное (значок, глубина промпта, правила мира) — общие для всех чатов.
+const CHAT_KEYS = new Set(['user', 'char', 'bonded', 'syncBond', 'termWeeks', 'activeFertility',
+    'autoTick', 'daysPerMessage', 'clock', 'auto', 'dyn', 'names']);
+
+const clone = o => JSON.parse(JSON.stringify(o));
+
+function pickChatKeys(src) {
+    const out = {};
+    for (const k of CHAT_KEYS) if (src[k] !== undefined) out[k] = clone(src[k]);
+    return out;
+}
+
+function globalSettings() {
     if (!extension_settings[SETTINGS_KEY]) extension_settings[SETTINGS_KEY] = {};
     const s = extension_settings[SETTINGS_KEY];
     mergeDefaults(s, SETTINGS_DEFAULTS);
@@ -200,16 +221,93 @@ function getSettings() {
     return s;
 }
 
+// Метаданные текущего чата (объект подменяется SillyTavern при смене чата)
+function chatMeta() {
+    const c = getContext();
+    return c.chatMetadata ?? chat_metadata;
+}
+
+function currentChatId() {
+    return getContext().chatId || '';
+}
+
+// Настройки: общие + настройки текущего чата. Первый раз в чате берём копию общих как шаблон.
+function getSettings() {
+    const g = globalSettings();
+    const st = getState();
+    if (!st.cfg || typeof st.cfg !== 'object') st.cfg = pickChatKeys(g);
+    mergeDefaults(st.cfg, pickChatKeys(SETTINGS_DEFAULTS));
+    const cfg = st.cfg;
+    return new Proxy(g, {
+        get: (t, k) => (CHAT_KEYS.has(k) ? cfg[k] : t[k]),
+        set: (t, k, v) => { if (CHAT_KEYS.has(k)) cfg[k] = v; else t[k] = v; return true; },
+    });
+}
+
 // Состояние хранится отдельно для каждого чата
 function getState() {
-    if (!chat_metadata[MODULE]) chat_metadata[MODULE] = {};
-    const st = chat_metadata[MODULE];
+    const meta = chatMeta();
+    if (!meta[MODULE] || typeof meta[MODULE] !== 'object') meta[MODULE] = {};
+    const st = meta[MODULE];
     mergeDefaults(st, STATE_DEFAULTS);
     if (!Array.isArray(st.history)) st.history = [];
+    if (!Array.isArray(st.dyn.tasks)) st.dyn.tasks = [];
     return st;
 }
 
+// --- Резервная копия данных чата в общих настройках -------------------------------------
+// Метаданные чата сохраняются с задержкой и могут не успеть записаться, если сразу выйти
+// из чата. Копия лежит в настройках расширения по id чата и подхватывается при открытии.
+
+const MAX_BACKUPS = 150;
+
+function backupChat() {
+    const id = currentChatId();
+    if (!id) return;
+    const st = getState();
+    const g = globalSettings();
+    const keys = Object.keys(st.snaps).map(Number).sort((a, b) => a - b).slice(-30);
+    const snaps = {};
+    for (const k of keys) snaps[k] = st.snaps[k];
+    g.chats[id] = { rev: st.rev, state: clone({ ...st, snaps }) };
+    const ids = Object.keys(g.chats);
+    if (ids.length > MAX_BACKUPS) {
+        ids.sort((a, b) => (g.chats[a].rev || 0) - (g.chats[b].rev || 0));
+        for (const old of ids.slice(0, ids.length - MAX_BACKUPS)) delete g.chats[old];
+    }
+}
+
+// При открытии чата: если копия новее (или данных в чате нет) — берём её
+function restoreFromBackup() {
+    const id = currentChatId();
+    if (!id) return;
+    const b = globalSettings().chats[id];
+    if (!b || !b.state) return;
+    const meta = chatMeta();
+    const cur = meta[MODULE];
+    const curRev = cur && typeof cur === 'object' ? Number(cur.rev) || 0 : 0;
+    if ((Number(b.rev) || 0) > curRev) {
+        meta[MODULE] = clone(b.state);
+        saveMetadataDebounced();
+    }
+}
+
 let processing = false;
+
+// Записываем и в метаданные чата, и в резервную копию
+function persist() {
+    if (!currentChatId()) return;
+    getState().rev = Date.now();
+    backupChat();
+    saveMetadataDebounced();
+    saveSettingsCore();
+}
+
+// Любое изменение настроек: общих и чатовых
+function saveSettingsDebounced() {
+    saveSettingsCore();
+    persist();
+}
 
 function saveState() {
     // Ручные изменения (кнопки) попадают в снимок последнего обработанного сообщения,
@@ -219,7 +317,7 @@ function saveState() {
         const keys = Object.keys(st.snaps).map(Number);
         if (keys.length) st.snaps[Math.max(...keys)] = captureState(st);
     }
-    saveMetadataDebounced();
+    persist();
 }
 
 function captureState(st) {
@@ -251,9 +349,31 @@ function pruneSnaps(st) {
     while (keys.length > 200) delete st.snaps[keys.shift()];
 }
 
+// Имена в этом чате. Приоритет: введённое вручную > имя из сообщений чата > имя персоны/карточки
+// ST > запомненное в этом чате. Найденное имя запоминается, чтобы профиль не «прыгал».
 function names() {
     const c = getContext();
-    return { user: c.name1 || 'Вы', char: c.name2 || 'Персонаж' };
+    const n = getSettings().names;
+    const chat = c.chat || [];
+    const fromChat = isUser => {
+        for (let i = chat.length - 1; i >= 0; i--) {
+            const m = chat[i];
+            if (m && !m.is_system && !!m.is_user === isUser && typeof m.name === 'string' && m.name.trim()) return m.name.trim();
+        }
+        return '';
+    };
+    const pick = (manual, remembered, isUser, fallback) => {
+        const m = (manual || '').trim();
+        if (m) return m;
+        return fromChat(isUser) || (fallback || '').trim() || (remembered || '').trim();
+    };
+    const user = pick(n.user, n.lastUser, true, c.name1) || 'Вы';
+    const char = pick(n.char, n.lastChar, false, c.name2) || 'Персонаж';
+    if (currentChatId()) {
+        if (n.lastUser !== user) n.lastUser = user;
+        if (n.lastChar !== char) n.lastChar = char;
+    }
+    return { user, char };
 }
 
 function otherOf(who) {
@@ -299,7 +419,9 @@ function phaseInfo(s, st, who) {
     const F = clampInt(src.fadeDays, 0, Math.max(0, rest), 2);
 
     const preg = st[owner].preg;
-    const broken = owner === who && !!(preg && preg.flags && preg.flags.cycle);
+    // Течка/гон владельца цикла не наступают во время беременности: подтверждённой сразу,
+    // скрытой — с момента симптома «цикл сбился»
+    const broken = owner === who && !!(preg && (preg.revealed !== false || (preg.flags && preg.flags.cycle)));
 
     // Режим «внезапно»: расписания нет, течка/гон стартуют случайно
     if (heatMode(s) === 'random') {
@@ -525,8 +647,8 @@ function doConceive(who, force) {
         return;
     }
     if (force) {
-        startPregnancy(who, null);
-        flash(hidden ? 'Готово. Результат скрыт: признаки проявятся позже.' : 'Беременность началась.', 'fa-person-pregnant', 'good');
+        // Отмеченная вручную беременность известна сразу: запускается отслеживание срока и состояния
+        startPregnancy(who, null, { visible: true });
         return;
     }
     const chance = conceptionChance(s, st, who, !!knotFlags[who]);
@@ -547,20 +669,22 @@ function doConceive(who, force) {
     refreshAll();
 }
 
-function startPregnancy(who, chance) {
+function startPregnancy(who, chance, { visible = false } = {}) {
     const s = getSettings();
     const st = getState();
-    const hidden = isHidden(s);
+    const hidden = isHidden(s) && !visible;
 
     // Скрытая беременность: симптомы проявляются в случайные моменты, затем — подтверждение
     const events = [];
     if (hidden) {
         let t = randInt(5, 12);
         events.push({ type: 'mood', at: t, done: false });
-        t += randInt(5, 10);
+        t += randInt(3, 7);
+        events.push({ type: 'nausea', at: t, done: false });
+        t += randInt(3, 7);
         events.push({ type: 'cycle', at: t, done: false });
         t += randInt(3, 8);
-        events.push({ type: 'sick', at: t, done: false });
+        events.push({ type: 'dizzy', at: t, done: false });
         t += randInt(5, 10);
         events.push({ type: 'reveal', at: t, done: false });
     }
@@ -571,10 +695,13 @@ function startPregnancy(who, chance) {
         birthNotified: false,
         revealed: !hidden,
         confirmedDay: hidden ? null : Math.floor(st.totalDays),
-        flags: { mood: false, cycle: false, sick: false },
+        flags: { mood: false, cycle: false, sick: false, nausea: false, dizzy: false },
         events,
+        tri: null,
+        wbManual: false,
     };
-    if (!hidden) addLog(who, chance != null ? `Зачатие! Беременность подтверждена (шанс был ~${chance}%)` : 'Беременность подтверждена');
+    if (!hidden) addLog(who, chance != null ? `Зачатие! Беременность подтверждена (шанс был ~${chance}%)` : 'Беременность отмечена, отслеживание запущено');
+    updatePregTracking(who);
     saveState();
     refreshAll();
     if (!hidden) pregnancyPopup(who, chance);
@@ -592,38 +719,84 @@ function popupAllowed(s, who) {
     return !!(s.auto.popups && (who === 'user' || s.auto.popupChar));
 }
 
+// Триместр по неделе срока
+function pregTrimester(week) {
+    return week < 13 ? 1 : (week < 27 ? 2 : 3);
+}
+
+// Самочувствие по сроку, если его не выставили вручную
+function autoWellbeing(week, term) {
+    if (term - week <= 2) return 62;
+    return [72, 92, 78][pregTrimester(week) - 1];
+}
+
+// Отслеживание подтверждённой беременности: триместр, самочувствие по сроку, уведомление о смене
+function updatePregTracking(who) {
+    const s = getSettings();
+    const st = getState();
+    const p = st[who].preg;
+    if (!p || p.revealed === false) return false;
+    const term = clampInt(s.termWeeks, 4, 60, 40);
+    const week = pregWeek(st, who);
+    const tri = pregTrimester(week);
+    let changed = false;
+    if (p.tri !== tri) {
+        if (p.tri != null) {
+            addLog(who, `${tri} триместр (неделя ${week})`);
+            if (popupAllowed(s, who)) flash(`${names()[who]}: начался ${tri} триместр (неделя ${week} из ${term})`, 'fa-person-pregnant', 'good');
+        }
+        p.tri = tri;
+        p.wbManual = false;
+        changed = true;
+    }
+    if (!p.wbManual) {
+        const wb = autoWellbeing(week, term);
+        if (p.wellbeing !== wb) { p.wellbeing = wb; changed = true; }
+    }
+    return changed;
+}
+
 // Наступили ли очередные симптомы / подтверждение скрытой беременности
 function checkPregEvents() {
     const s = getSettings();
     const st = getState();
     for (const who of ['user', 'char']) {
         const p = st[who].preg;
-        if (!p || p.revealed !== false || !Array.isArray(p.events)) continue;
-        const elapsed = st.totalDays - p.startDay;
-        const due = p.events.filter(e => !e.done && elapsed >= e.at);
-        if (!due.length) continue;
-
-        const symptoms = [];
-        let reveal = false;
-        for (const e of due) {
-            e.done = true;
-            if (e.type === 'reveal') {
-                p.revealed = true;
-                p.confirmedDay = Math.floor(st.totalDays);
-                addLog(who, 'Беременность подтверждена');
-                reveal = true;
-            } else {
-                p.flags[e.type] = true;
-                addLog(who, `Симптом: ${SYMPTOMS[e.type][0]}`);
-                symptoms.push(e.type);
-                if (e.type === 'sick') p.wellbeing = randInt(45, 65);
+        if (!p) continue;
+        if (p.revealed === false && Array.isArray(p.events)) {
+            const elapsed = st.totalDays - p.startDay;
+            const due = p.events.filter(e => !e.done && elapsed >= e.at).sort((a, b) => a.at - b.at);
+            if (due.length) {
+                const symptoms = [];
+                let reveal = false;
+                for (const e of due) {
+                    e.done = true;
+                    if (e.type === 'reveal') {
+                        p.revealed = true;
+                        p.confirmedDay = Math.floor(st.totalDays);
+                        addLog(who, 'Беременность подтверждена, отслеживание запущено');
+                        reveal = true;
+                    } else {
+                        p.flags[e.type] = true;
+                        if (e.type === 'nausea' || e.type === 'dizzy') p.flags.sick = true;
+                        addLog(who, `Симптом: ${SYMPTOMS[e.type][0]}`);
+                        symptoms.push(e.type);
+                        if (e.type === 'sick' || e.type === 'nausea' || e.type === 'dizzy') p.wellbeing = randInt(45, 65);
+                    }
+                }
+                // После подтверждения симптомы уже не показываем отдельно
+                if (reveal) {
+                    updatePregTracking(who);
+                    saveState();
+                    pregnancyPopup(who, null, '1');
+                } else {
+                    saveState();
+                    eventPopup(who, symptoms);
+                }
+                continue;
             }
         }
-        saveState();
-
-        const nm = names()[who];
-        if (reveal) pregnancyPopup(who, null, '1');
-        if (symptoms.length) eventPopup(who, symptoms);
+        if (updatePregTracking(who)) saveState();
     }
 }
 
@@ -638,6 +811,250 @@ function checkBirths() {
             birthPopup(who);
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Динамика: самочувствие и задания по сюжету
+// ---------------------------------------------------------------------------
+
+// Сдвиг самочувствия от заданий затухает за неделю истории
+function feelBonus(st, who) {
+    const f = st.dyn.fb[who];
+    if (!f || !f.v) return 0;
+    const elapsed = Math.max(0, st.totalDays - (f.day || 0));
+    return Math.round(f.v * Math.max(0, 1 - elapsed / 7));
+}
+
+function feelBase(st, who) {
+    const p = st[who].preg;
+    if (p && (p.revealed !== false ? true : !!(p.flags && p.flags.sick))) return clampInt(p.wellbeing, 0, 100, 75);
+    return 75;
+}
+
+// Итоговое самочувствие, 0–100
+function feelOf(st, who) {
+    return clampInt(feelBase(st, who) + feelBonus(st, who), 0, 100, 75);
+}
+
+function applyFeel(who, d) {
+    const st = getState();
+    const v = Math.max(-40, Math.min(40, feelBonus(st, who) + d));
+    st.dyn.fb[who] = { v, day: st.totalDays };
+}
+
+const TASK_POOL = [
+    // [тон, текст, юзер, партнёр, условие]
+    ['pos', 'Обнять {c} со спины', 4, 8],
+    ['pos', 'Выпить вместе чаю', 5, 5],
+    ['pos', 'Сказать {cd} искренний комплимент', 3, 7],
+    ['pos', 'Приготовить для {c} завтрак', 4, 9],
+    ['pos', 'Укрыть {c} пледом', 3, 7],
+    ['pos', 'Погулять вдвоём без телефонов', 6, 6],
+    ['pos', 'Помассировать {cd} плечи', 4, 9],
+    ['pos', 'Принести {cd} любимое лакомство', 3, 8],
+    ['pos', 'Признаться {cd} в том, о чём давно молчал(а)', 5, 6],
+    ['pos', 'Посидеть рядом, держась за руки', 5, 6],
+    ['neu', 'Спросить, как прошёл день у {c}', 2, 3],
+    ['neu', 'Предложить {cd} вместе посмотреть фильм', 3, 3],
+    ['neu', 'Вместе навести порядок в комнате', 1, 1],
+    ['neu', 'Обсудить с {ci} планы на ближайшие дни', 2, 2],
+    ['neu', 'Задать {cd} неожиданный личный вопрос', 2, 1],
+    ['neu', 'Устроить с {ci} небольшое соревнование', 3, 2],
+    ['neu', 'Позвать {c} сменить обстановку и уйти куда-нибудь вдвоём', 2, 2],
+    ['neg', 'Снять все деньги с карты и пойти пошопиться', 7, -8],
+    ['neg', 'Нагрубить {cd} на пустом месте', -4, -9],
+    ['neg', 'Демонстративно игнорировать {c} целый час', -3, -8],
+    ['neg', 'Устроить сцену ревности без повода', -5, -10],
+    ['neg', 'Уйти из дома, не предупредив {c}', -3, -9],
+    ['neg', 'Забыть о важной договорённости с {ci}', -4, -8],
+    ['neg', 'Закрыться в комнате и не выходить до вечера', -3, -6],
+    ['neg', 'Перебить {c} и поспорить по мелочи', -3, -7],
+    ['neg', 'Назло съесть последний десерт {c}', 2, -4],
+    ['pos', 'Принести {cd} воды и перестелить гнездо', 4, 10, 'charActive'],
+    ['neg', 'Оставить {c} одного(ой) в самый разгар', -6, -14, 'charActive'],
+    ['pos', 'Остаться рядом с {ci} и не отходить', 6, 9, 'charActive'],
+    ['pos', 'Спросить {c} о самочувствии и о малыше', 3, 9, 'charPreg'],
+    ['neg', 'Заставить {c} таскать тяжёлое', -3, -10, 'charPreg'],
+    ['pos', 'Принести {cd} что-нибудь от тошноты', 4, 9, 'charPreg'],
+];
+
+let dynBusy = false;
+
+function dynConditions(s, st) {
+    const info = phaseInfo(s, st, 'char');
+    return {
+        charActive: info.phase === 'active' && !info.broken,
+        charPreg: !!visiblePreg(st, 'char'),
+    };
+}
+
+function newTask(text, tone, du, dc, src) {
+    const st = getState();
+    st.dyn.seq = (st.dyn.seq || 0) + 1;
+    return { id: st.dyn.seq, text: String(text).trim(), tone, du: Math.round(du), dc: Math.round(dc), done: false, day: Math.floor(st.totalDays), src };
+}
+
+// Случайные задания из набора (без повторов того, что уже висит в списке)
+function dynAddLocal(n = 3, quiet = false) {
+    const s = getSettings();
+    const st = getState();
+    const cond = dynConditions(s, st);
+    const nm = names();
+    const have = new Set(st.dyn.tasks.filter(t => !t.done).map(t => t.text));
+    const pool = TASK_POOL.filter(t => !t[4] || cond[t[4]])
+        .map(t => ({ ...{ tone: t[0], text: t[1].replace(/\{cd\}/g, 'партнёру').replace(/\{ci\}/g, 'партнёром').replace(/\{c\}/g, 'партнёра'), du: t[2], dc: t[3] }, bias: t[4] ? 3 : 1 }))
+        .filter(t => !have.has(t.text));
+    const picked = [];
+    // Берём разные тона: сначала по одному из каждого, потом остальное случайно
+    for (const tone of ['pos', 'neg', 'neu']) {
+        const c = pool.filter(t => t.tone === tone && !picked.includes(t));
+        if (c.length && picked.length < n) picked.push(c[Math.floor(Math.random() * c.length)]);
+    }
+    while (picked.length < n && picked.length < pool.length) {
+        const c = pool.filter(t => !picked.includes(t));
+        const w = c.reduce((a, t) => a + t.bias, 0);
+        let r = Math.random() * w;
+        picked.push(c.find(t => (r -= t.bias) < 0) || c[0]);
+    }
+    for (const t of picked) st.dyn.tasks.push(newTask(t.text, t.tone, t.du, t.dc, 'rand'));
+    trimTasks(st);
+    st.dyn.lastMsg = (getContext().chat || []).length;
+    saveState();
+    if (!quiet) refreshAll();
+    return picked.length;
+}
+
+function trimTasks(st) {
+    const done = st.dyn.tasks.filter(t => t.done);
+    if (done.length > 20) {
+        const drop = new Set(done.slice(0, done.length - 20).map(t => t.id));
+        st.dyn.tasks = st.dyn.tasks.filter(t => !drop.has(t.id));
+    }
+    const open = st.dyn.tasks.filter(t => !t.done);
+    if (open.length > 12) {
+        const drop = new Set(open.slice(0, open.length - 12).map(t => t.id));
+        st.dyn.tasks = st.dyn.tasks.filter(t => !drop.has(t.id));
+    }
+}
+
+function parseTasks(raw) {
+    const text = String(raw || '');
+    let arr = null;
+    const a = text.indexOf('['), b = text.lastIndexOf(']');
+    if (a >= 0 && b > a) {
+        try { arr = JSON.parse(text.slice(a, b + 1)); } catch { arr = null; }
+    }
+    if (!Array.isArray(arr)) {
+        arr = [];
+        for (const m of text.matchAll(/\{[^{}]*\}/g)) {
+            try { arr.push(JSON.parse(m[0])); } catch { /* пропускаем */ }
+        }
+    }
+    const out = [];
+    for (const o of arr) {
+        if (!o || typeof o.text !== 'string') continue;
+        const t = o.text.trim().replace(/^["«]|["»]$/g, '');
+        if (t.length < 3 || t.length > 140) continue;
+        const du = Math.max(-20, Math.min(20, Math.round(Number(o.user ?? o.du) || 0)));
+        const dc = Math.max(-20, Math.min(20, Math.round(Number(o.char ?? o.dc) || 0)));
+        let tone = ['pos', 'neu', 'neg'].includes(o.tone) ? o.tone : (dc > 1 ? 'pos' : dc < -1 ? 'neg' : 'neu');
+        out.push({ text: t, tone, du, dc });
+    }
+    return out;
+}
+
+// Просим модель придумать задания по текущему сюжету
+async function dynGenerate(n = 3, { auto = false } = {}) {
+    if (dynBusy) return;
+    const id = currentChatId();
+    if (!id) return;
+    dynBusy = true;
+    app?.refresh();
+    const nm = names();
+    const st0 = getState();
+    st0.dyn.lastMsg = (getContext().chat || []).length;
+    let tasks = [];
+    try {
+        const ctx = getContext();
+        const gen = ctx.generateQuietPrompt;
+        if (typeof gen !== 'function') throw new Error('generateQuietPrompt недоступен');
+        const q = `[Pause the roleplay and do not continue the scene. Based on the story so far, the current scene, setting and relationship, suggest ${n} short in-story actions that ${nm.user} could take toward ${nm.char}. ` +
+            `Mix the tones: at least one positive (kind, caring), one neutral (everyday), and one negative (impulsive, hurtful or self-serving). Each action must fit what is happening in the story right now, be concrete and doable within one scene, 3 to 10 words, written in Russian as an infinitive phrase (for example "Обнять со спины"). ` +
+            `For each, estimate how doing it changes the wellbeing of ${nm.user} ("user") and of ${nm.char} ("char") as an integer from -15 to 15. ` +
+            `Reply with ONLY a JSON array and no other text: [{"text":"...","tone":"pos|neu|neg","user":5,"char":-8}]]`;
+        // В новых версиях SillyTavern функция принимает объект, в старых — строку
+        const raw = gen.length === 0 ? await gen({ quietPrompt: q }) : await gen(q, false, false);
+        tasks = parseTasks(raw).slice(0, n + 2);
+    } catch (e) {
+        console.warn('[Omegaverse] генерация заданий не удалась', e);
+    }
+    dynBusy = false;
+    if (currentChatId() !== id) return;   // за время ожидания открыли другой чат
+    const st = getState();
+    if (tasks.length) {
+        for (const t of tasks) st.dyn.tasks.push(newTask(t.text, t.tone, t.du, t.dc, 'llm'));
+        trimTasks(st);
+        saveState();
+        if (auto) flash(`${nm.user}: новые задания в «Динамике»`, 'fa-bolt', 'info', 4000);
+    } else {
+        dynAddLocal(Math.min(n, 3), true);
+        if (!auto) toastr.warning('Модель не вернула задания в нужном виде, добавил случайные.', 'Omegaverse');
+    }
+    refreshAll();
+}
+
+// Раз в несколько ответов подкидываем новые задания, пока открытых мало
+function maybeAutoTasks() {
+    const s = getSettings();
+    if (!s.dyn.auto || dynBusy) return;
+    const st = getState();
+    const len = (getContext().chat || []).length;
+    const open = st.dyn.tasks.filter(t => !t.done).length;
+    const want = clampInt(s.dyn.count, 1, 6, 3);
+    if (open >= want) return;
+    const every = clampInt(s.dyn.every, 2, 50, 8);
+    const first = st.dyn.lastMsg == null;
+    if (first ? len < 4 : len - st.dyn.lastMsg < every) return;
+    dynGenerate(want - open, { auto: true });
+}
+
+function dynToggle(id) {
+    const st = getState();
+    const t = st.dyn.tasks.find(x => x.id === Number(id));
+    if (!t) return;
+    const nm = names();
+    const sign = t.done ? -1 : 1;
+    t.done = !t.done;
+    t.doneDay = t.done ? Math.floor(st.totalDays) : null;
+    applyFeel('user', sign * t.du);
+    applyFeel('char', sign * t.dc);
+    if (t.done) {
+        addLog('user', `Задание выполнено: ${t.text}`);
+        const f = d => (d > 0 ? '+' : d < 0 ? '−' : '±') + Math.abs(d);
+        flash(`Выполнено: ${t.text}. Самочувствие: ${nm.user} ${f(t.du)}, ${nm.char} ${f(t.dc)}`, 'fa-check', t.dc < 0 ? 'warn' : 'good', 6000);
+    }
+    saveState();
+    refreshAll();
+}
+
+function dynRemove(id) {
+    const st = getState();
+    const t = st.dyn.tasks.find(x => x.id === Number(id));
+    if (!t) return;
+    if (t.done) {   // удаление выполненного отменяет его эффект
+        applyFeel('user', -t.du);
+        applyFeel('char', -t.dc);
+    }
+    st.dyn.tasks = st.dyn.tasks.filter(x => x !== t);
+    saveState();
+    refreshAll();
+}
+
+function dynClearDone() {
+    const st = getState();
+    st.dyn.tasks = st.dyn.tasks.filter(t => !t.done);
+    saveState();
+    refreshAll();
 }
 
 // ---------------------------------------------------------------------------
@@ -1065,13 +1482,22 @@ function personPrompt(s, st, who, name) {
     if (g.word && info.phase === 'active' && info.startAbs != null) parts.push(heatTimingText(st, info, name, g.word));
 
     parts.push(`Mood: ${MOODS[effectiveMood(s, st, who)][1]}.`);
+    const feel = feelOf(st, who);
+    if (feel <= 35) parts.push(`${name} feels physically and emotionally drained.`);
+    else if (feel >= 90) parts.push(`${name} is in excellent spirits and feels great.`);
 
     const preg = st[who].preg;
     if (preg) {
         const wb = clampInt(preg.wellbeing, 0, 100, 100);
         if (preg.revealed !== false) {
             const term = clampInt(s.termWeeks, 4, 60, 40);
-            let l = `${name} is pregnant (week ${pregWeek(st, who)} of ${term}).`;
+            const wk = pregWeek(st, who);
+            const tri = pregTrimester(wk);
+            let l = `${name} is pregnant (week ${wk} of ${term}, ${['first', 'second', 'third'][tri - 1]} trimester).`;
+            l += [' Early pregnancy: possible nausea, fatigue and mood swings.',
+                ' Pregnancy is progressing steadily; the belly is becoming noticeable.',
+                ' Late pregnancy: heaviness, fatigue and nesting instincts; birth is approaching.'][tri - 1];
+            l += ' Heats do not occur during pregnancy.';
             if (p.sex === 'male') l += ' Delivery will be by cesarean section.';
             if (wb < 40) l += ' Their health is poor and they need care and rest.';
             parts.push(l);
@@ -1079,7 +1505,11 @@ function personPrompt(s, st, who, name) {
             // Беременность ещё неизвестна: в промпт попадают только симптомы, без слова «pregnant»
             const f = preg.flags || {};
             if (f.cycle) parts.push(`${name}'s expected heat has not come; their cycle is disrupted for no known reason.`);
-            if (f.sick) parts.push(`${name} feels unwell for no clear reason: weakness, dizziness, nausea and heightened sensitivity to smells.`);
+            const sick = [];
+            if (f.nausea) sick.push('nausea and sensitivity to smells');
+            if (f.dizzy) sick.push('weakness and dizziness');
+            if (!sick.length && f.sick) sick.push('weakness, dizziness, nausea and heightened sensitivity to smells');
+            if (sick.length) parts.push(`${name} feels unwell for no clear reason: ${sick.join(', ')}.`);
         }
     }
     return parts.join(' ');
@@ -1091,10 +1521,11 @@ function buildPrompt(s) {
     if (s.clock.enabled) {
         lines.push('Story time passes only as shown by the date and time in the status block. Heats and ruts last as many in-story days as stated below: do not shorten, skip or resolve them early.');
     }
-    lines.push(personPrompt(s, st, 'user', '{{user}}'));
-    lines.push(personPrompt(s, st, 'char', '{{char}}'));
+    const nm = names();
+    lines.push(personPrompt(s, st, 'user', nm.user));
+    lines.push(personPrompt(s, st, 'char', nm.char));
     if (s.bonded) {
-        lines.push('{{user}} and {{char}} are bonded: they instantly recognize each other\'s scent, sense each other\'s emotions, and their heat and rut cycles are synchronized.');
+        lines.push(`${nm.user} and ${nm.char} are bonded: they instantly recognize each other\'s scent, sense each other\'s emotions, and their heat and rut cycles are synchronized.`);
     }
     return '[' + lines.filter(Boolean).join('\n') + ']';
 }
@@ -1252,24 +1683,29 @@ function flash(text, icon = 'fa-circle-info', kind = 'info', ms = 5000) {
 
 // Внезапный симптом: «что-то не так», без объяснения причины
 function eventPopup(who, types) {
+    if (!popupAllowed(getSettings(), who)) return;
     const nm = names()[who];
-    types.forEach(t => flash(`${nm}: ${SYMPTOMS[t][0]}`, 'fa-triangle-exclamation', 'warn'));
+    types.forEach(t => flash(`${nm}: ${SYMPTOMS[t][0]}. ${SYMPTOMS[t][1]}`, 'fa-triangle-exclamation', 'warn', 8000));
 }
 
 // Начало течки/гона (внезапное или по расписанию)
 function onsetPopup(who) {
+    if (!popupAllowed(getSettings(), who)) return;
     const nm = names()[who];
     const word = getSettings()[who].gender === 'omega' ? 'течка' : 'гон';
     flash(`${nm}: началась ${word}`, 'fa-fire', 'heat', 6000);
 }
 
 function pregnancyPopup(who, chance, notesHtml = '') {
+    if (!popupAllowed(getSettings(), who)) return;
     const nm = names()[who];
+    const st = getState();
     const term = clampInt(getSettings().termWeeks, 4, 60, 40);
-    flash(`${nm}: ${notesHtml ? 'беременность подтверждена' : 'беременность'} (срок ${term} нед.)`, 'fa-person-pregnant', 'good');
+    flash(`${nm}: ${notesHtml ? 'беременность подтверждена' : 'беременность отмечена'}. Отслеживание запущено: неделя ${pregWeek(st, who)} из ${term}`, 'fa-person-pregnant', 'good', 7000);
 }
 
 function birthPopup(who) {
+    if (!popupAllowed(getSettings(), who)) return;
     flash(`${names()[who]}: наступил срок родов`, 'fa-baby', 'good', 7000);
 }
 
@@ -1475,6 +1911,7 @@ function onMessageReceived(messageId) {
     if (!getSettings().enabled) return;
     processMessage(msgIndex(messageId));
     refreshAll();
+    maybeAutoTasks();
 }
 
 // Свайп на другой вариант (или начало нового): состояние пересчитывается под показанный текст
@@ -1500,12 +1937,14 @@ function onMessageDeleted() {
     if (lb >= 0 && st.snaps[lb]) {
         for (const k of Object.keys(st.snaps)) if (Number(k) > lb) delete st.snaps[k];
         restoreState(st, st.snaps[lb]);
-        saveMetadataDebounced();
+        persist();
     }
     refreshAll();
 }
 
 function onChatChanged() {
+    restoreFromBackup();
+    if (currentChatId()) { names(); persist(); }
     if (!getSettings().enabled) {
         refreshAll();
         return;
@@ -1529,6 +1968,7 @@ jQuery(() => {
         phaseInfo, phaseLabel, isIrregular, visiblePreg, pregWeek, effectiveMood, conceptionChance,
         setCycleDay, suddenHeat, doConceive, cancelPreg, shiftTime, birthPopup, finishPregnancy,
         autoPanelHtml, refreshAll, clockLabel,
+        feelOf, dynAddLocal, dynGenerate, dynToggle, dynRemove, dynClearDone, dynIsBusy: () => dynBusy,
     });
     buildSettings();
     addWandButton();

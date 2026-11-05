@@ -12,6 +12,7 @@ const PH_COLOR = {
 const TABS = [
     ['today', 'fa-heart-pulse', 'Сегодня'],
     ['partner', 'fa-user-group', 'Партнёр'],
+    ['dyn', 'fa-bolt', 'Динамика'],
     ['profile', 'fa-circle-user', 'Профиль'],
 ];
 
@@ -73,7 +74,7 @@ export function initApp(api) {
 
         if (shown) {
             const w = api.pregWeek(st, who);
-            const wb = clampInt(shown.wellbeing, 0, 100, 100);
+            const wb = api.feelOf(st, who);
             label = 'Беременность';
             big = `Неделя ${w}`;
             sub = `из ${term} · самочувствие ${wb}%`;
@@ -135,10 +136,7 @@ export function initApp(api) {
     // -----------------------------------------------------------------------
 
     function wellbeingOf(who) {
-        const p = ST()[who].preg;
-        if (!p) return null;
-        if (p.revealed !== false || (p.flags && p.flags.sick)) return clampInt(p.wellbeing, 0, 100, 100);
-        return null;
+        return api.feelOf(ST(), who);
     }
 
     function cardsHtml(who) {
@@ -280,7 +278,7 @@ export function initApp(api) {
         const conceived = Math.floor(preg.startDay) + 1;
         const due = Math.floor(preg.startDay + term * 7) + 1;
         const conf = preg.confirmedDay != null ? preg.confirmedDay + 1 : null;
-        const wb = clampInt(preg.wellbeing, 0, 100, 100);
+        const wb = api.feelOf(st, who);
         const name = esc(api.names()[who]);
         let h = `<div class="ova-preg-h"><i class="fa-solid fa-person-pregnant"></i> Беременность подтверждена</div>
             <p class="ova-muted">${name}: ${esc(stage)}</p>`;
@@ -341,19 +339,11 @@ export function initApp(api) {
         h += rowHtml('Настроение', esc(api.MOODS[api.effectiveMood(s, st, who)][0]));
         if ((p.scent || '').trim()) h += rowHtml('Запах', esc(p.scent.trim()));
 
-        if (shown) {
-            const wb = clampInt(shown.wellbeing, 0, 100, 100);
-            h += rowHtml('Беременность', `неделя ${api.pregWeek(st, who)}/${term}`);
-            h += rowHtml('Самочувствие', `${wb}%`);
-            h += barHtml(wb, 'wb');
-        } else {
-            if (p.gender === 'omega') h += rowHtml('Беременность', (s.auto.enabled && s.auto.hiddenPreg) ? 'не подтверждена' : 'нет');
-            if (preg && preg.flags && preg.flags.sick) {
-                const wb = clampInt(preg.wellbeing, 0, 100, 100);
-                h += rowHtml('Самочувствие', `${wb}%`);
-                h += barHtml(wb, 'wb');
-            }
-        }
+        if (shown) h += rowHtml('Беременность', `неделя ${api.pregWeek(st, who)}/${term}`);
+        else if (p.gender === 'omega') h += rowHtml('Беременность', (s.auto.enabled && s.auto.hiddenPreg) ? 'не подтверждена' : 'нет');
+        const wb = api.feelOf(st, who);
+        h += rowHtml('Самочувствие', `${wb}%`);
+        h += barHtml(wb, 'wb');
         if (s.bonded) h += rowHtml('Связь', 'есть метка');
         return `<div class="ova-status">${h}</div>`;
     }
@@ -397,7 +387,7 @@ export function initApp(api) {
                 h += `<label class="checkbox_label"><input type="checkbox" data-knot="${who}" ${api.knotFlags[who] ? 'checked' : ''} /><span>Узел (knotting)</span></label>`;
             }
             h += `<div class="ova-btnrow">
-                ${shown ? btn('birth', 'Роды') : btn('conceive', 'Бросок зачатия') + btn('forcePreg', 'Беременность без броска')}
+                ${shown ? btn('birth', 'Роды') : btn('conceive', 'Бросок зачатия') + btn('forcePreg', 'Отметить беременность')}
                 ${btn('cancelPreg', 'Сбросить беременность')}
             </div>`;
         }
@@ -454,11 +444,71 @@ export function initApp(api) {
         return personScreen('char', head);
     }
 
+    // ---- Динамика ----
+
+    const TONE = { pos: ['Приятное', 'pos'], neu: ['Нейтральное', 'neu'], neg: ['Неприятное', 'neg'] };
+
+    function signed(n) {
+        return (n > 0 ? '+' : n < 0 ? '−' : '±') + Math.abs(n);
+    }
+
+    function feelCard(who) {
+        const st = ST();
+        const wb = api.feelOf(st, who);
+        return `<div class="ova-feel"><div class="ova-feel-h"><span>${esc(api.names()[who])}</span><b>${wb}%</b></div>${barHtml(wb, 'wb')}</div>`;
+    }
+
+    function taskHtml(t) {
+        const tone = TONE[t.tone] || TONE.neu;
+        const nm = api.names();
+        return `<div class="ova-task ${t.done ? 'done' : ''} tone-${tone[1]}">
+            <button class="ova-check" data-act="taskToggle" data-id="${t.id}" aria-label="${t.done ? 'Вернуть' : 'Выполнено'}"><i class="fa-solid fa-check"></i></button>
+            <div class="ova-task-b">
+                <div class="ova-task-t">${esc(t.text)}</div>
+                <div class="ova-task-m"><span class="ova-chip ${tone[1]}">${tone[0]}</span>
+                    <span>${esc(nm.user)} ${signed(t.du)}</span><span>${esc(nm.char)} ${signed(t.dc)}</span></div>
+            </div>
+            <button class="ova-task-x" data-act="taskDel" data-id="${t.id}" aria-label="Убрать"><i class="fa-solid fa-xmark"></i></button>
+        </div>`;
+    }
+
+    function dynScreen() {
+        const s = S();
+        const st = ST();
+        const tasks = st.dyn.tasks || [];
+        const open = tasks.filter(t => !t.done);
+        const done = tasks.filter(t => t.done);
+        const busy = api.dynIsBusy();
+        const F = api.Fields;
+        let h = `<div class="ova-pad">
+            <div class="ova-title">Динамика</div>
+            <div class="ova-h sm">Самочувствие</div>
+            <div class="ova-status">${feelCard('user')}${feelCard('char')}</div>
+            <p class="ova-muted">Выполненные задания меняют самочувствие, эффект затухает за неделю истории.</p>
+            <div class="ova-h sm">Задания</div>
+            <div class="ova-btnrow">
+                <button class="ova-btn pink" data-act="taskGen" ${busy ? 'disabled' : ''}><i class="fa-solid fa-wand-magic-sparkles"></i> ${busy ? 'Придумываю…' : 'По сюжету'}</button>
+                <button class="ova-btn" data-act="taskRand"><i class="fa-solid fa-dice"></i> Случайное</button>
+                ${done.length ? '<button class="ova-btn" data-act="taskClear">Убрать выполненные</button>' : ''}
+            </div>`;
+        h += open.length
+            ? `<div class="ova-tasks">${open.map(taskHtml).join('')}</div>`
+            : `<p class="ova-muted">Пока заданий нет. Нажмите «По сюжету»: модель предложит действия по ситуации в чате.</p>`;
+        if (done.length) h += `<div class="ova-h sm">Выполнено</div><div class="ova-tasks">${done.slice().reverse().map(taskHtml).join('')}</div>`;
+        h += `<div class="ova-h sm">Авто-задания</div><div class="ova-status">
+            ${F.chk('dyn.auto', 'Предлагать задания по ходу сюжета')}
+            ${F.num('dyn.every', 'Не чаще, чем раз в N сообщений', 2, 50)}
+            ${F.num('dyn.count', 'Сколько заданий держать открытыми', 1, 6)}
+        </div></div>`;
+        return h;
+    }
+
     // ---- Профиль ----
 
     function personFields(who) {
         const F = api.Fields;
         return `
+        ${F.txt(`names.${who}`, 'Имя в этом чате', `определяется из чата: ${api.names()[who]}`)}
         ${F.sel(`${who}.sex`, 'Пол', [['male', 'Мужской ♂'], ['female', 'Женский ♀']])}
         ${F.sel(`${who}.gender`, 'Вторичный пол', [['alpha', 'Альфа α'], ['beta', 'Бета β'], ['omega', 'Омега Ω']])}
         ${F.txt(`${who}.scent`, 'Запах', who === 'user' ? 'напр.: мёд и тёплый дождь' : 'напр.: кедр и дым')}
@@ -576,6 +626,7 @@ export function initApp(api) {
     // -----------------------------------------------------------------------
 
     function screenHtml(which) {
+        if (which === 'dyn') return dynScreen();
         if (which === 'partner') return partnerScreen();
         if (which === 'profile') return profileScreen();
         return todayScreen();
@@ -625,6 +676,11 @@ export function initApp(api) {
                     return;
                 }
                 case 'time': api.shiftTime($t.data('n')); return;
+                case 'taskToggle': api.dynToggle($t.data('id')); return;
+                case 'taskDel': api.dynRemove($t.data('id')); return;
+                case 'taskClear': api.dynClearDone(); return;
+                case 'taskRand': api.dynAddLocal(3); return;
+                case 'taskGen': api.dynGenerate(3); return;
                 case 'sec': openSec = openSec === $t.data('sec') ? '' : $t.data('sec'); render(); return;
                 case 'startActive': api.setCycleDay(who, 'active'); break;
                 case 'endActive': api.setCycleDay(who, 'end'); break;
@@ -648,7 +704,7 @@ export function initApp(api) {
         $r.on('change', 'input[data-wb]', function () {
             const who = $(this).data('wb');
             const preg = api.getState()[who].preg;
-            if (preg) preg.wellbeing = Number($(this).val());
+            if (preg) { preg.wellbeing = Number($(this).val()); preg.wbManual = true; }
             api.saveState();
             api.refreshAll();
         });

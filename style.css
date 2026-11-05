@@ -346,7 +346,7 @@
 .ova-tabbar {
     flex: none;
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(4, 1fr);
     border-top: 1px solid var(--ov-line);
     background: var(--ov-bg2);
     padding-bottom: env(safe-area-inset-bottom, 0px);
@@ -963,3 +963,124 @@
 .ova-preg-h i { color: var(--ov-brass); margin-right: 6px; }
 .ova-preg-card.warn .ova-preg-h i { color: var(--ov-amber); }
 .ova-preg-card .ova-muted { margin: 4px 0 8px; }
+
+/* Динамика */
+.ova-h.sm {
+    margin: 18px 0 8px;
+    font-size: 19px;
+}
+
+.ova-feel + .ova-feel {
+    margin-top: 8px;
+}
+
+.ova-feel-h {
+    display: flex;
+    justify-content: space-between;
+    font-size: 13px;
+}
+
+.ova-feel-h b {
+    font-weight: 600;
+}
+
+.ova-phone .ova-btn[disabled] {
+    opacity: 0.55;
+    pointer-events: none;
+}
+
+.ova-tasks {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 12px;
+}
+
+.ova-task {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 10px 10px 10px 12px;
+    border-radius: 14px;
+    border: 1px solid var(--ov-line);
+    background: var(--ov-bg2);
+}
+
+.ova-check {
+    flex: none;
+    width: 24px;
+    height: 24px;
+    margin-top: 1px;
+    border-radius: 50%;
+    border: 1.5px solid var(--ov-line2);
+    background: transparent;
+    color: transparent;
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.ova-task.done .ova-check {
+    background: var(--ov-brass);
+    border-color: var(--ov-brass);
+    color: var(--ov-on-brass);
+}
+
+.ova-task-b {
+    flex: 1;
+    min-width: 0;
+}
+
+.ova-task-t {
+    font-size: 14px;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+}
+
+.ova-task.done .ova-task-t {
+    text-decoration: line-through;
+    color: var(--ov-faint);
+}
+
+.ova-task.done .ova-task-m {
+    opacity: 0.55;
+}
+
+.ova-task-m {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 10px;
+    margin-top: 5px;
+    color: var(--ov-dim);
+    font-size: 11.5px;
+}
+
+.ova-chip {
+    padding: 1px 8px;
+    border-radius: 999px;
+    border: 1px solid var(--ov-line2);
+    font-size: 11px;
+}
+
+.ova-chip.pos {
+    color: var(--ov-brass);
+    border-color: var(--ov-brass-d);
+}
+
+.ova-chip.neg {
+    color: var(--ov-ember);
+    border-color: var(--ov-ember);
+}
+
+.ova-task-x {
+    flex: none;
+    border: 0;
+    background: transparent;
+    color: var(--ov-faint);
+    cursor: pointer;
+    padding: 2px 4px;
+}
+
+.ova-task-x:hover {
+    color: var(--ov-ember);
+}
